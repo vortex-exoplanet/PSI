@@ -1,7 +1,10 @@
 import numpy as np
 
-def processCorrection(ncpa_estimate_, correction_, correction_normalisation, aperture_, ncpa_filter_aperture_, recon_zern_recon, \
-	zern_recon, modal_means_init_, modal_means_, reset=False, resetFilter=None, ZernCorrection=True, ms=0):
+def processCorrection(ncpa_estimate_, correction_, correction_normalisation,
+					  aperture_, ncpa_filter_aperture_, recon_zern_recon, \
+					  zern_recon, modal_means_init_, modal_means_,
+					  reset=False, resetFilter=None, ZernCorrection=True, ms=0):
+
 	m_corrections      = recon_zern_recon.dot(ncpa_estimate_ * aperture_)
 
 	# Lets have a look at the zernikes which are produced. Starting from the 4th zernike (no piston or tip/tilt)
@@ -65,12 +68,21 @@ def processCorrection(ncpa_estimate_, correction_, correction_normalisation, ape
 	else:
 		return correction_
 
-def processCorrection_Original(ncpa_estimate_, correction_, correction_normalisation, aperture_, ncpa_filter_aperture_, recon_zern_recon, \
-	zern_recon, modal_means_init_, modal_means_, reset=False, resetFilter=None, ZernCorrection=True, ms=0):
+def processCorrection_Original(ncpa_estimate_, correction_,
+							   correction_normalisation, aperture_,
+							   ncpa_filter_aperture_, recon_zern_recon, 
+							   zern_recon, modal_means_init_, modal_means_,
+							   reset=False, resetFilter=None,
+							   ZernCorrection=True, ms=0):
 
 	m_corrections      = recon_zern_recon.dot(ncpa_estimate_ * aperture_)
 	ncpa_estimate_temp = np.copy(ncpa_estimate_)
 	new_correction_max = np.max(zern_recon.transformation_matrix.dot(m_corrections*modal_means_init_))
+
+	if np.size(ms) != 1:
+		m_mean = np.mean(m_corrections)
+		m_std  = np.std(m_corrections)
+		ms += m_corrections#*modal_means_
 
 	lo_freq_estimate  = zern_recon.transformation_matrix.dot(m_corrections*modal_means_)
 	lo_freq_estimate *= np.max(lo_freq_estimate) / new_correction_max
