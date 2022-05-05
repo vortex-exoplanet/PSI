@@ -170,7 +170,9 @@ def load_and_process(file, in_fold, mask_pup, grid, pow=1e3, wavelength=1.0, pis
     if piston == True:
         phase_pupil = remove_piston(phase_pupil, mask_pup.shaped)
     phase_residual_ao = Field(phase_pupil.ravel(), grid)
-    wf_post_ = Wavefront(np.exp(1j * phase_residual_ao*mask_pup) * mask_pup, wavelength)
+#     wf_post_ = Wavefront(np.exp(1j * phase_residual_ao*mask_pup) * mask_pup, wavelength)
+    wf_post_ = Wavefront(np.exp(1j * phase_residual_ao*mask_pup) * mask_pup)
+
     wf_post_.total_power = pow
     return wf_post_
 

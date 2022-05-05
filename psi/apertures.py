@@ -1,11 +1,13 @@
 import numpy as np
+import astropy.io.fits as fits
+import os
 # from ..field import CartesianGrid, UnstructuredCoords, make_hexagonal_grid, Field
 # from .generic import *
 
 # These two lines maybe needed in the future for making custom apertures so I have left them in
 from hcipy.field import CartesianGrid, UnstructuredCoords, make_hexagonal_grid, Field
 from hcipy.aperture.generic import *
-
+from .psi_utils import crop_img, resize_img
 
 def make_vlt_aperture():
     pass
@@ -23,9 +25,10 @@ def make_elt_aperture():
     pass
 
 
-def make_COMPASS_aperture(npupil=256,
-                          input_folder='/Users/matt/Documents/METIS/TestArea/fepsi/COMPASSPhaseScreens/Test/',
-                          file_name='mask_256.fits',
+def make_COMPASS_aperture(fname,
+                          npupil=256,
+                          # input_folder='/Users/matt/Documents/METIS/TestArea/fepsi/COMPASSPhaseScreens/Test/',
+                          # file_name='mask_256.fits',
                           nimg=720):
     '''Create an aperture from a COMPASS product.
 
@@ -45,7 +48,8 @@ def make_COMPASS_aperture(npupil=256,
             The resized COMPASS aperture.
     '''
 
-    mask = fits.getdata(os.path.join(input_folder, 'mask_256.fits'))
+    # mask = fits.getdata(os.path.join(input_folder, 'mask_256.fits'))
+    mask = fits.getdata(fname)
     if mask.shape[0] < nimg:
         mask = crop_img(mask, nimg, verbose=False)
     mask_pupil = resize_img(mask, npupil)
