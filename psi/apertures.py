@@ -29,7 +29,7 @@ def make_COMPASS_aperture(fname,
                           npupil=256,
                           # input_folder='/Users/matt/Documents/METIS/TestArea/fepsi/COMPASSPhaseScreens/Test/',
                           # file_name='mask_256.fits',
-                          nimg=720):
+                          rot90=False, crop=False, ncrop=720):
     '''Create an aperture from a COMPASS product.
 
     Parameters
@@ -50,9 +50,12 @@ def make_COMPASS_aperture(fname,
 
     # mask = fits.getdata(os.path.join(input_folder, 'mask_256.fits'))
     mask = fits.getdata(fname)
-    if mask.shape[0] < nimg:
-        mask = crop_img(mask, nimg, verbose=False)
+    # if mask.shape[0] < nimg:
+    if crop:
+        mask = crop_img(mask, ncrop, verbose=False)
     mask_pupil = resize_img(mask, npupil)
+    if rot90:
+        mask_pupil= np.rot90(mask_pupil)
     #mask_pupil[mask_pupil<0.8] = 0
     # mask_pupil = mask_pupil.transpose() # Testing for wind direction dependencies. Should be commented out.
     aperture = np.ravel(mask_pupil)
