@@ -16,10 +16,7 @@ The initial commit of this repository is a copy of [psi](https://github.com/mwil
 
 ## Dependencies
 
-Code requires the following Python packages:
-  * `astropy`
-  * `matplotlib`
-  * `hcipy`
+Code requires the following Python package : `hcipy` and all its dependencies.
 
 The ffmpeg tools are required for generating movies.
 
