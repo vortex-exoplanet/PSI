@@ -1,6 +1,8 @@
 import os
 import abc
 from types import SimpleNamespace
+import sys
+sys.path.append('')
 import hcipy
 import psi
 import numpy as np
@@ -121,7 +123,7 @@ class CompassSimInstrument(GenericInstrument):
                                                   rot90=True)(self.pupilGrid)
         # self.aperture = np.rot90(self.aperture)
         self._inst_mode = conf.inst_mode  # which type of imaging system
-        if self._inst_mode == 'CVC':
+        if self._inst_mode == 'CVC' or self._inst_mode == 'RAVC':
             self._vc_charge = conf.vc_charge
             self._vc_vector = conf.vc_vector
             # Lyot stop mask definition ...
@@ -147,7 +149,7 @@ class CompassSimInstrument(GenericInstrument):
         self._input_folder_ncpa = conf.ncpa_folder
         self._prefix_ncpa = conf.ncpa_prefix
         self.ncpa_scaling = conf.ncpa_scaling
-        self._initialize_ncpa()
+        self._initialize_dynamic_ncpa()
 
         self.include_water_vapour = conf.wv
         if self.include_water_vapour:
@@ -202,6 +204,35 @@ class CompassSimInstrument(GenericInstrument):
         # lyot_stop_mask = hp.circular_aperture(0.95)
         # lyot_stop = hcipy.Apodizer(lyot_stop_mask)
 
+
+
+    def _initialize_dynamic_ncpa(self):
+        # -- NCPA should be part of the instrument ... not here ----
+        self._ncpa_index = 0
+        ncpa_file = self._prefix_ncpa + str(self._ncpa_index) + '.fits'
+        size_pupil_grid = int(self.pupilGrid.shape[0])
+        self.phase_ncpa = psi.loadNCPA(self.aperture, size_pupil_grid,
+                                       file_=ncpa_file,
+                                       folder_=self._input_folder_ncpa)
+        self.phase_ncpa *= self.ncpa_scaling
+        # # compute min max for plot
+        # ncpa_min = - np.ptp(self.phase_ncpa) / 2
+        # ncpa_max = np.ptp(self.phase_ncpa) / 2
+
+    def _update_dynamic_ncpa(self, current_time):
+        '''read/compute a new NCPA map'''
+
+        if (((current_time - self._zero_time_ms)/1e3) % self.ncpa_sampling) == 0:
+            self.logger.info('Updating NCPA map')
+            ncpa_file = self._prefix_ncpa+str(self._ncpa_index) + '.fits'
+            size_pupil_grid = int(self.pupilGrid.shape[0])
+            self.phase_ncpa = psi.loadNCPA(self.aperture,
+                                           size_pupil_grid,
+                                           file_=ncpa_file,
+                                           folder_=self._input_folder_ncpa)
+            self.phase_ncpa *= self.ncpa_scaling
+            self._ncpa_index += 1
+
     def _initialize_water_vapour(self):
         self._wv_index = 0
         # HEEPS cubes are in meters
@@ -229,34 +260,6 @@ class CompassSimInstrument(GenericInstrument):
                                    size_pupil_grid,
                                    self.aperture, rotate=True)
             self._wv_index += 1
-
-
-
-    def _initialize_ncpa(self):
-        # -- NCPA should be part of the instrument ... not here ----
-        self._ncpa_index = 0
-        ncpa_file = self._prefix_ncpa + str(self._ncpa_index) + '.fits'
-        size_pupil_grid = int(self.pupilGrid.shape[0])
-        self.phase_ncpa = psi.loadNCPA(self.aperture, size_pupil_grid,
-                                       file_=ncpa_file,
-                                       folder_=self._input_folder_ncpa)
-        self.phase_ncpa *= self.ncpa_scaling
-        # # compute min max for plot
-        # ncpa_min = - np.ptp(self.phase_ncpa) / 2
-        # ncpa_max = np.ptp(self.phase_ncpa) / 2
-
-    def _update_dynamic_ncpa(self, current_time):
-        '''read/compute a new NCPA map'''
-
-        if (((current_time - self._zero_time_ms)/1e3) % self.ncpa_sampling) == 0:
-            # self.logger.info('Updating NCPA map')
-            ncpa_file = self._prefix_ncpa+str(self._ncpa_index) + '.fits'
-            size_pupil_grid = int(self.pupilGrid.shape[0])
-            self.phase_ncpa = psi.loadNCPA(self.aperture,
-                                           size_pupil_grid,
-                                           file_=ncpa_file,
-                                           folder_=self._input_folder_ncpa)
-            self._ncpa_index += 1
 
 
 
@@ -365,6 +368,7 @@ class CompassSimInstrument(GenericInstrument):
         # 	image_cube[i] = prop(coro(wf_post_)).power.shaped
         # else:
         # 	image_cube[i] = prop((wf_post_)).power.shaped
+        assert len(self._image_cube.shape) == 3
         image = self._image_cube.mean(0)
         # Photometry -- TBC
         if self.noise == 0:
