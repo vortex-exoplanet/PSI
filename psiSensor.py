@@ -100,7 +100,7 @@ class PsiSensor():
 		self.ncpa_mask = self.inst.aperture
 
 		# -- [WIP] Scaling of ncpa correction
-		self.ncpa_scaling =  1 #1.e6
+		self.ncpa_scaling =  1 #1.e6  # NB: this is not the same as cfg.params.ncpa_scaling !!
 
 
 		self.iter = 0 # iteration index of PSI
@@ -133,6 +133,9 @@ class PsiSensor():
 				  delimiter= '\t')
 
 	def _store_phase_screens_to_file(self, i):
+		'''
+			TODO populate the header with useful information
+		'''
 		conv2nm = self.inst.wavelength / (2*np.pi) * 1e9
 
 		ncpa_correction = self.inst.phase_ncpa_correction * conv2nm
@@ -236,6 +239,7 @@ class PsiSensor():
 		# speckle_fields_perfect = self.inst.optical_model(Efield_perfect).electric_field
 		#
 		# speckle_fields = speckle_fields - speckle_fields_perfect
+		# reproducing what is normally done in Wavefront.power to obtain the correct flux normalisation
 		return speckle_fields.electric_field * np.sqrt(speckle_fields.grid.weights)
 
 	@timeit
@@ -303,6 +307,7 @@ class PsiSensor():
 			self.ncpa_scaling = scaling
 
 		# Arbitratry gain rule
+		# For the first 5 iteration, this gives: [1.0, 0.5, 0.25, 0.125, 0.1]
 		gain = np.max((0.5**self.iter, 0.1))
 
 		# Send correction

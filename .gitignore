@@ -134,3 +134,5 @@ dmypy.json
 
 *.tar.gz
 data/wavefront
+.idea/
+data/_archives/

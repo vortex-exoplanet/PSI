@@ -6,16 +6,6 @@ class ConfigurationError(Exception):
 
 class Parameters(object):
     """
-    The configuration class holding all simulation configuration information
-
-    This class is used to load the parameter dictionary from file, instantiate each configuration object and calculate some other parameters from the parameters given.
-
-    The configuration file given to this class must contain a python dictionary, named ``simConfiguration``. This must contain other dictionaries for each sub-module of the system, ``Sim``, ``Atmosphere``, ``Telescope``, ``WFS``, ``LGS``, ``DM``, ``Science``. For the final 4 sub-dictionaries, each entry must be formatted as a list (or numpy array) where each value corresponds to that component.
-
-    The number of components on the module will only depend on the number set in the ``Sim`` dict. For example, if ``nGS`` is set to 2 in ``Sim``, then in the ``WFS`` dict, each parameters must have at least 2 entries, e.g. ``subaps : [10,10]``. If the parameter has more than 2 entries, then only the first 2 will be noted and any others discarded.
-
-    Descriptions of the available parameters for each sub-module are given in that that config classes documentation
-
     Args:
         filename (string): The name of the configuration file
 
