@@ -29,7 +29,8 @@ def make_COMPASS_aperture(fname,
                           npupil=256,
                           # input_folder='/Users/matt/Documents/METIS/TestArea/fepsi/COMPASSPhaseScreens/Test/',
                           # file_name='mask_256.fits',
-                          rot90=False, crop=False, ncrop=720):
+                          rot90=False, crop=False, ncrop=720,
+                          binary=False):
     '''Create an aperture from a COMPASS product.
 
     Parameters
@@ -50,6 +51,9 @@ def make_COMPASS_aperture(fname,
 
     # mask = fits.getdata(os.path.join(input_folder, 'mask_256.fits'))
     mask = fits.getdata(fname)
+    if binary:
+        mask[mask>0.5]=1
+        mask[mask<=0.5]=0
     # if mask.shape[0] < nimg:
     if crop:
         mask = crop_img(mask, ncrop, verbose=False)

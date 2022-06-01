@@ -62,15 +62,16 @@ class PsiSensor():
 		# TODO orthogonalization should be done on the specific aperture
 		if self.cfg.params.psi_correction_mode is not 'all':
 			self.logger.info('Building modal basis for projectiong/filtering of the NCPA map')
+			diam = 1
 			if self.cfg.params.psi_correction_mode == 'zern':
-			    self.M2C = hcipy.make_zernike_basis(self.cfg.params.psi_nb_modes, 1,
+			    self.M2C = hcipy.make_zernike_basis(self.cfg.params.psi_nb_modes, diam,
 										 	   self.inst.pupilGrid,
 										 	   self.cfg.params.psi_start_mode_idx).orthogonalized
 			if self.cfg.params.psi_correction_mode == 'dh':
 				self.logger.warn('Warning psi_start_mode_idx is ignored')
 				self.M2C = hcipy.make_disk_harmonic_basis(self.inst.pupilGrid,
 													 self.cfg.params.psi_nb_modes,
-													 1)
+													 diam)
 
 			self.C2M = hcipy.inverse_tikhonov(self.M2C.transformation_matrix, 1e-3)
 
