@@ -5,6 +5,7 @@ import sys
 sys.path.append('')
 import hcipy
 import psi
+from psi.psi_utils import crop_img, resize_img
 import numpy as np
 from helperFunctions import LazyLogger
 import astropy.io.fits as fits
@@ -23,9 +24,9 @@ class GenericInstrument():
         self._prop = hcipy.FraunhoferPropagator(self.pupilGrid, self.focalGrid)
 
 
-        self.phase_ncpa = 0         # knowledge only in Simulation
-        self.phase_wv = 0           # knowledge only in Simulation
-        self.phase_ncpa_correction = 0  # NCPA correction applied
+        self.phase_ncpa = hcipy.Field(0.0, self.pupilGrid)         # knowledge only in Simulation
+        self.phase_wv = hcipy.Field(0.0, self.pupilGrid)           # knowledge only in Simulation
+        self.phase_ncpa_correction = hcipy.Field(0.0, self.pupilGrid)  # NCPA correction applied
 
         pass
 
@@ -94,14 +95,15 @@ class CompassSimInstrument(GenericInstrument):
 
         self._setup(conf)
 
-        self._zero_time_ms = 2011
-        self._current_time_ms = 2011  # starting time with COMPASS phase_screens
-        self._start_time_wfs = 2011
-        self._end_time_wfs = 2011
-        self._start_time_sci_buffer = 2011
-        self._end_time_sci_buffer = 2011
-        self._start_time_last_sci_dit = 2011
-        self._end_time_last_sci_dit = 2011
+        start_idx = 2011
+        self._zero_time_ms = start_idx
+        self._current_time_ms = start_idx  # starting time with COMPASS phase_screens
+        self._start_time_wfs = start_idx
+        self._end_time_wfs = start_idx
+        self._start_time_sci_buffer = start_idx
+        self._end_time_sci_buffer = start_idx
+        self._start_time_last_sci_dit = start_idx
+        self._end_time_last_sci_dit = start_idx
 
     def _setup(self, conf):
         self.wfs_exptime = 1 / conf.ao_framerate
@@ -118,9 +120,11 @@ class CompassSimInstrument(GenericInstrument):
         self._suffix = conf.turb_suffix
         self._input_folder = conf.turb_folder
 
+        # Aperture definition -- GOX: see also modification later in _setup to cope with slight mismatch with the NCPA maps
         self.aperture = psi.make_COMPASS_aperture(conf.f_aperture,
                                                   npupil=self._size_pupil_grid,
-                                                  rot90=True)(self.pupilGrid)
+                                                  rot90=True,
+                                                  binary=True)(self.pupilGrid)
         # self.aperture = np.rot90(self.aperture)
         self._inst_mode = conf.inst_mode  # which type of imaging system
         if self._inst_mode == 'CVC' or self._inst_mode == 'RAVC':
@@ -131,6 +135,10 @@ class CompassSimInstrument(GenericInstrument):
                                                             npupil=self._size_pupil_grid,
                                                             rot90=True)(self.pupilGrid)
             # self.lyot_stop_mask = np.rot90(self.lyot_stop_mask)
+        if self._inst_mode == 'RAVC' or self._inst_mode == 'APP':
+            self.pupil_apodizer = psi.make_COMPASS_aperture(conf.f_apodizer,
+                                                            npupil=self._size_pupil_grid,
+                                                            rot90=True)(self.pupilGrid)
 
         self.noise = conf.noise
         # if self.noise == 1:
@@ -150,6 +158,23 @@ class CompassSimInstrument(GenericInstrument):
         self._prefix_ncpa = conf.ncpa_prefix
         self.ncpa_scaling = conf.ncpa_scaling
         self._initialize_dynamic_ncpa()
+        # --- Customizing the entrance aperture due to some small mismatch in the NCPA definition ---
+        # nb: see the 'hardcoded' +6 pixels -- same as in psi_utils.loadNCPA
+        self.logger.warn('Customizing entrance aperture as a function of NCPA map definition')
+        ncpa_file = self._prefix_ncpa + str(self._ncpa_index) + '.fits'
+        mask_pupil = fits.getdata(self._input_folder_ncpa + ncpa_file)
+        mask_pupil[mask_pupil != 0 ]=1
+        # mask_pupil = resize_img(mask_pupil, self._size_pupil_grid)
+        # mask_pupil= np.rot90(mask_pupil)
+        size_ = self._size_pupil_grid
+        mask_pupil = psi.psi_utils.process_screen(mask_pupil, size_+6,
+                                                  self.aperture, rotate=True, ncpa_=True)
+        mask_pupil = psi.psi_utils.crop_img(mask_pupil, (size_, size_))
+
+
+        mask_pupil = np.ravel(mask_pupil)
+        self.aperture = self.aperture * mask_pupil
+        #-------------#
 
         self.include_water_vapour = conf.wv
         if self.include_water_vapour:
@@ -159,10 +184,11 @@ class CompassSimInstrument(GenericInstrument):
             self.wv_scaling = conf.wv_scaling
             self._initialize_water_vapour()
         else:
-            self.phase_wv = 0
+            pass
+            # self.phase_wv = 0  # already initialilze in GenericInstrument
         # self.aperture = conf.aperture
 
-        self.phase_ncpa_correction = 0
+        # self.phase_ncpa_correction = 0
         # ....
 
         # self.start_time = 2011
@@ -194,7 +220,24 @@ class CompassSimInstrument(GenericInstrument):
             self.optical_model = hcipy.OpticalSystem([self._prop])
 
         elif self._inst_mode == 'RAVC':
-            self.logger.warning('Ring-apodizer vortex coronagraph not supported')
+
+            self.logger.info('Building a Ring-Apodizer Vortex Coronagraph optical model in HCIPy')
+
+            self._ring_apodizer = hcipy.Apodizer(self.pupil_apodizer)
+
+            assert self._vc_charge == 2 or self._vc_charge == 4
+
+            if self._vc_vector:
+                self._vvc_element = hcipy.VectorVortexCoronagraph(self._vc_charge)
+            else:
+                self._vvc_element = hcipy.VortexCoronagraph(self.pupilGrid, self._vc_charge)
+
+            self._lyot_stop_element = hcipy.Apodizer(self.lyot_stop_mask)
+
+            self.optical_model = hcipy.OpticalSystem([self._ring_apodizer,
+                                                      self._vvc_element,
+                                                      self._lyot_stop_element,
+                                                      self._prop])
 
         elif self._inst_mode == 'APP':
             self.logger.warning('APP not supported')
@@ -427,7 +470,7 @@ class CompassSimInstrument(GenericInstrument):
         return phase_cube
 
     def setNcpaCorrection(self, phase):
-        self.phase_ncpa_correction += phase
+        self.phase_ncpa_correction = self.phase_ncpa_correction + phase
 
     def synchronizeBuffers(self, wfs_telemetry_buffer, sci_image_buffer):
         '''
@@ -453,6 +496,139 @@ class CompassSimInstrument(GenericInstrument):
 
     def getNumberOfPhotons(self):
         return self.num_photons
+
+class DemoCompassSimInstrument(CompassSimInstrument):
+
+    def __init__(self, conf, logger=LazyLogger('CompassInstrument')):
+        super().__init__(conf)
+
+    def _grabOneScienceImage(self):
+        '''
+            Compute a single science image: consist of several realisation of the
+            residual turbulence (+ NPCA, WV, NCPA_correction)
+        '''
+        # conversion_COMPASSToNm = 1e3
+        # conv = conversion_COMPASSToNm * (2 * np.pi / self.wavelength * 1e-9)
+        # conv = 2 * np.pi
+        nbOfFrames = int(self.sci_exptime / (self.wfs_exptime * self.ao_frame_decimation))
+        deltaTime = (self.wfs_exptime * self.ao_frame_decimation) * 1e3
+        timeIdxInMs = np.arange(nbOfFrames) * deltaTime
+
+        # self._start_time_sci = np.copy(self._current_time_ms)
+        # file_indices = [str(int(self._current_time_ms + timeIdxInMs[i]))
+        #                 for i in range(len(timeIdxInMs))]
+        self._start_time_last_sci_dit= np.copy(self._end_time_last_sci_dit)
+        file_indices = [str(int(self._start_time_last_sci_dit + timeIdxInMs[i]))
+                        for i in range(len(timeIdxInMs))]
+
+        # phase in radians
+        file_wf = self._prefix_rp + '_'  + self._suffix
+        phase_pupil = fits.getdata(os.path.join(self._input_folder, file_wf)) * self.conv2rad
+
+        # Remove piston
+        phase_pupil = psi.remove_piston(phase_pupil, self.aperture.shaped)
+        # conversion to HCIPy
+        residual_phase = hcipy.Field(phase_pupil.ravel(), self.pupilGrid)
+        wf_post_ = hcipy.Wavefront(np.exp(1j * residual_phase) * self.aperture,
+                                   self.wavelength)
+        # Setting number of photons
+        # wf_post_.total_power = self.num_photons
+        # Propagation through the instrument
+        efield_fp = self.optical_model(wf_post_)
+        img_one = efield_fp.power
+
+        nx, ny = img_one.shaped.shape
+        image_cube = np.zeros((nbOfFrames, nx, ny))
+        ss = residual_phase.shape[0]
+        total_phase_cube = np.zeros((nbOfFrames, ss))
+
+        for i in range(len(file_indices)):
+            # self._current_time_ms = self._current_time_ms + timeIdxInMs[i]
+
+            # file_wf = self._prefix_rp + '_' + file_indices[i] + self._suffix
+
+            #
+            if self.include_residual_turbulence:
+                self.phase_residual = phase_pupil
+
+
+            # Get current NCPA correction
+
+            total_phase_cube[i] = self.phase_residual.ravel() + \
+                self.phase_wv + self.phase_ncpa + self.phase_ncpa_correction
+
+        # Forward propagation and calculation of the image for a sequence of phases
+        total_phase_cube = hcipy.Field(total_phase_cube, self.pupilGrid)
+        # wf_post_ = hcipy.Wavefront(np.exp(1j * total_phase_cube) * self.aperture, 1)
+        wf_post_ = hcipy.Wavefront(np.exp(1j * total_phase_cube) * self.aperture)
+
+        # Setting number of photons
+        # ToDo
+        wf_post_.total_power = self.num_photons * nbOfFrames
+        # Propagation through the instrument
+        # TODO: expose 'prop' and 'coro'
+
+        self._image_cube = self.optical_model(wf_post_).power.shaped
+        # if vvc:
+        # 	image_cube[i] = prop(coro(wf_post_)).power.shaped
+        # else:
+        # 	image_cube[i] = prop((wf_post_)).power.shaped
+        assert len(self._image_cube.shape) == 3
+        image = self._image_cube.mean(0)
+        # Photometry -- TBC
+        if self.noise == 0:
+            noisy_image = image
+        elif self.noise == 1:
+            noisy_image = hcipy.large_poisson(image)
+        elif self.noise == 2:
+            background_noise = hcipy.large_poisson(self.bckg_level + image*0) - \
+                self.bckg_level
+            noisy_image = hcipy.large_poisson(image) + background_noise
+        # +	np.random.poisson(nb_photons, image.shape)
+
+        self._end_time_last_sci_dit = self._start_time_last_sci_dit + timeIdxInMs[-1] + deltaTime
+
+        return noisy_image
+
+    def grabWfsTelemetry(self, nbOfPastSeconds):
+        '''
+        Returns
+                phase cube in units of radian
+        '''
+        # self._compass_start_time=2011 # COMPASS 0 indexing in msec
+
+        # conversion_COMPASSToNm = 1e3
+        # conv = conversion_COMPASSToNm * (2 * np.pi / self.wavelength * 1e-9)
+        nbOfFrames = int(nbOfPastSeconds / (self.wfs_exptime * self.ao_frame_decimation))
+        deltaTime = (self.wfs_exptime * self.ao_frame_decimation) * 1e3
+        timeIdxInMs = np.arange(nbOfFrames) * deltaTime
+
+
+        self._start_time_wfs = np.copy(self._current_time_ms)
+        file_indices = [str(int(self._current_time_ms + timeIdxInMs[i]))
+                        for i in range(len(timeIdxInMs))]
+
+        fname = self._prefix_wf + '_'  + self._suffix
+        phase_pupil = fits.getdata(os.path.join(self._input_folder, fname)) *\
+            self.conv2rad
+
+        phase_cube = np.zeros((nbOfFrames, phase_pupil.shape[0], phase_pupil.shape[1]))
+
+        for i in range(len(file_indices)):
+            # self._current_time_ms = self._current_time_ms + timeIdxInMs[i]
+            # file_wf = self._prefix_wf + '_' + file_indices[i] + self._suffix
+
+            # # read file
+            # phase = fits.getdata(os.path.join(self._input_folder, file_wf)) *\
+            #     self.conv2rad
+            # # remove piston
+            # phase = psi.remove_piston(phase, self.aperture.shaped)
+            # phase *= self.toto_scaling
+
+            phase_cube[i] = np.copy(phase_pupil)
+
+        self._end_time_wfs = self._current_time_ms + timeIdxInMs[-1] + deltaTime
+        return phase_cube
 
 class HcipySimInstrument(GenericInstrument):
     pass
