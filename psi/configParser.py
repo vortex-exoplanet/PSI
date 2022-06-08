@@ -1,5 +1,7 @@
 import traceback
-from helperFunctions import LazyLogger
+import sys
+# sys.path.append('/Users/orban/Projects/METIS/4.PSI/psi_github/')
+from .helperFunctions import LazyLogger
 
 class ConfigurationError(Exception):
     pass
@@ -9,6 +11,59 @@ class Parameters(object):
     Args:
         filename (string): The name of the configuration file
 
+
+
+    Description of the config parameters
+        ========================      ===================
+        **Required Parameter**        **Description**
+        ------------------------      -------------------
+        ``npupil``                    int: number of pixels of the pupil
+        ``det_size``                  -
+        ``det_res``                   -
+        ``instrument``                -
+        ``inst_mode``                 -
+        ``vc_charge``                 -
+        ``vc_vector``                 -
+        ``f_aperture``                -
+        ``f_lyot_stop``               -
+        ``dit``                       -
+        ``ao_framerate``              -
+        ``ao_frame_decimation``       -
+        ``psi_framerate``             -
+        ``psi_nb_iter``               -
+        ``psi_correction_mode``       -
+        ``psi_nb_modes``              -
+        ``psi_start_mode_idx``        -
+        ``ncpa_expected_rms``         -
+        ``save_loop_statistics``      -
+        ``save_phases_screens``       -
+        ``save_basedir``              -
+        ========================      ===================
+
+        ======================      ===================
+        **Optional Parameter**      **Description**
+        ----------------------      -------------------
+        ``noise``                   -
+        ``mag``                     -
+        ``wavelength``              - req ?
+        ``flux_zpt``                -
+        ``flux_bckg``               -
+        ``ncpa_dynamic``            -
+        ``ncpa_sampling``           -
+        ``ncpa_scaling``            -
+        ``ncpa_expected_rms``       -
+        ``ncpa_folder``             -
+        ``ncpa_prefix``             -
+        ``turb_folder``             -
+        ``turb_prefix_rp``          -
+        ``turb_prefix_wf``          -
+        ``turb_suffix``             -
+        ``wv``                      -
+        ``wv_folder``               -
+        ``wv_cube_name``            -
+        ``wv_sampling``             -
+        ``wv_scaling``              -
+        ======================      ===================
     """
 
     def __init__(self, filename, logger=LazyLogger('Params')):

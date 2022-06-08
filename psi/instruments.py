@@ -2,17 +2,29 @@ import os
 import abc
 from types import SimpleNamespace
 import sys
-sys.path.append('')
+# sys.path.append('')
 import hcipy
-import psi
-from psi.psi_utils import crop_img, resize_img
+# sys.path.append('/Users/orban/Projects/METIS/4.PSI/psi_github/')
+import psi.psi_utils as psi_utils
+from psi.psi_utils.psi_utils import crop_img, resize_img
 import numpy as np
-from helperFunctions import LazyLogger
+from .helperFunctions import LazyLogger
 import astropy.io.fits as fits
 
 
 class GenericInstrument():
+    '''
+    Abstract Generic instrument
+
+    Define all the necessary methods and properties that are used by
+    ``PsiSensor``.
+    '''
     def __init__(self, conf):
+        '''
+        Compute the pupilGrid and the focalGrid within the HCIPy framework.
+        Compute phase buffer as HCIPy.Field.
+        Define the propagator from pupil to focal plane as Fraunhofer propagator
+        '''
         self._size_pupil_grid = conf.npupil
         self._focal_grid_resolution = conf.det_res
         self._focal_grid_size = conf.det_size
@@ -34,7 +46,7 @@ class GenericInstrument():
     def optical_model(self):
         '''
         HCIPy.OpticalSystem object
-            a linear path of optical elements that propagate the wavefront
+            a linear path of optical elements that propagates the wavefront
             forward and backward.
         '''
         return self._optical_model
@@ -50,36 +62,53 @@ class GenericInstrument():
 
     @property
     def aperture(self):
+        '''
+        Entrance pupil of the instrument
+        '''
         return self._aperture
 
     @aperture.setter
     def aperture(self, aper):
+        '''
+        Setting the entrance pupil of the instrument
+        '''
         self._aperture = aper
 
     @abc.abstractmethod
     def grabWfsTelemetry(self):
+        '''
+        Grab wavefront sensor telemetry and returns wavefront buffer
+        '''
         pass
 
     @abc.abstractmethod
     def grabScienceImages(self):
+        '''
+        Grab science images and returns science images buffer
+        '''
         pass
 
     @abc.abstractmethod
     def setNcpaCorrection(self):
+        '''
+            Set the NPCA phase correction.
+        '''
         pass
 
     @abc.abstractmethod
     def synchronizeBuffers(self):
-        ''' synchronize science and wfs telemetry buffers'''
+        '''
+        Synchronize science and wfs telemetry buffers
+        '''
         pass
 
     @abc.abstractmethod
     def getNumberOfPhotons(self):
         '''
-        provide estimate of the total number of photons at entering
-        the pupil plane
+        Provides an estimate of the total number of photons at
+        the entrance pupil plane
 
-        as part as calibration
+        (calibration task)
         '''
         pass
 
@@ -121,7 +150,7 @@ class CompassSimInstrument(GenericInstrument):
         self._input_folder = conf.turb_folder
 
         # Aperture definition -- GOX: see also modification later in _setup to cope with slight mismatch with the NCPA maps
-        self.aperture = psi.make_COMPASS_aperture(conf.f_aperture,
+        self.aperture = psi_utils.make_COMPASS_aperture(conf.f_aperture,
                                                   npupil=self._size_pupil_grid,
                                                   rot90=True,
                                                   binary=True)(self.pupilGrid)
@@ -131,12 +160,12 @@ class CompassSimInstrument(GenericInstrument):
             self._vc_charge = conf.vc_charge
             self._vc_vector = conf.vc_vector
             # Lyot stop mask definition ...
-            self.lyot_stop_mask = psi.make_COMPASS_aperture(conf.f_lyot_stop,
+            self.lyot_stop_mask = psi_utils.make_COMPASS_aperture(conf.f_lyot_stop,
                                                             npupil=self._size_pupil_grid,
                                                             rot90=True)(self.pupilGrid)
             # self.lyot_stop_mask = np.rot90(self.lyot_stop_mask)
         if self._inst_mode == 'RAVC' or self._inst_mode == 'APP':
-            self.pupil_apodizer = psi.make_COMPASS_aperture(conf.f_apodizer,
+            self.pupil_apodizer = psi_utils.make_COMPASS_aperture(conf.f_apodizer,
                                                             npupil=self._size_pupil_grid,
                                                             rot90=True)(self.pupilGrid)
 
@@ -167,9 +196,9 @@ class CompassSimInstrument(GenericInstrument):
         # mask_pupil = resize_img(mask_pupil, self._size_pupil_grid)
         # mask_pupil= np.rot90(mask_pupil)
         size_ = self._size_pupil_grid
-        mask_pupil = psi.psi_utils.process_screen(mask_pupil, size_+6,
+        mask_pupil = psi_utils.psi_utils.process_screen(mask_pupil, size_+6,
                                                   self.aperture, rotate=True, ncpa_=True)
-        mask_pupil = psi.psi_utils.crop_img(mask_pupil, (size_, size_))
+        mask_pupil = psi_utils.psi_utils.crop_img(mask_pupil, (size_, size_))
 
 
         mask_pupil = np.ravel(mask_pupil)
@@ -200,6 +229,16 @@ class CompassSimInstrument(GenericInstrument):
         self.toto_scaling = 1
 
     def build_optical_model(self):
+        '''
+            Building an optical model in HCIPy depending on the instrument mode selected.
+
+            Instrument modes are
+                - CVC :  Classical Vector Coronagraph
+                - ELT : normal imaging (no coronagraph, no Lyot stop)
+                - RAVC : Ring-Apodized Vector Coronagraph
+                - APP : Apodized Phase Plate coronagraph
+
+        '''
         if self._inst_mode == 'CVC':
             self.logger.info('Building a Classical Vortex Coronagraph optical model in HCIPy')
 
@@ -254,7 +293,7 @@ class CompassSimInstrument(GenericInstrument):
         self._ncpa_index = 0
         ncpa_file = self._prefix_ncpa + str(self._ncpa_index) + '.fits'
         size_pupil_grid = int(self.pupilGrid.shape[0])
-        self.phase_ncpa = psi.loadNCPA(self.aperture, size_pupil_grid,
+        self.phase_ncpa = psi_utils.loadNCPA(self.aperture, size_pupil_grid,
                                        file_=ncpa_file,
                                        folder_=self._input_folder_ncpa)
         self.phase_ncpa *= self.ncpa_scaling
@@ -269,7 +308,7 @@ class CompassSimInstrument(GenericInstrument):
             self.logger.info('Updating NCPA map')
             ncpa_file = self._prefix_ncpa+str(self._ncpa_index) + '.fits'
             size_pupil_grid = int(self.pupilGrid.shape[0])
-            self.phase_ncpa = psi.loadNCPA(self.aperture,
+            self.phase_ncpa = psi_utils.loadNCPA(self.aperture,
                                            size_pupil_grid,
                                            file_=ncpa_file,
                                            folder_=self._input_folder_ncpa)
@@ -283,7 +322,7 @@ class CompassSimInstrument(GenericInstrument):
         self.phase_wv_cube = fits.getdata(self.wv_folder + self.wv_cubename)
         size_pupil_grid = int(self.pupilGrid.shape[0])
         self.phase_wv  = self.conv2rad_wv * \
-            psi.process_screen(self.phase_wv_cube[0],
+            psi_utils.process_screen(self.phase_wv_cube[0],
                                size_pupil_grid,
                                self.aperture, rotate=True)
         # folder_wv = '/Users/orban/Projects/METIS/4.PSI/legacy_TestArea/WaterVapour/phases/'
@@ -299,7 +338,7 @@ class CompassSimInstrument(GenericInstrument):
             # self.logger.info('Updating WV map')
             size_pupil_grid = int(self.pupilGrid.shape[0])
             self.phase_wv  = self.conv2rad_wv * \
-                psi.process_screen(self.phase_wv_cube[self._wv_index],
+                psi_utils.process_screen(self.phase_wv_cube[self._wv_index],
                                    size_pupil_grid,
                                    self.aperture, rotate=True)
             self._wv_index += 1
@@ -353,7 +392,7 @@ class CompassSimInstrument(GenericInstrument):
         phase_pupil = fits.getdata(os.path.join(self._input_folder, file_wf)) * self.conv2rad
 
         # Remove piston
-        phase_pupil = psi.remove_piston(phase_pupil, self.aperture.shaped)
+        phase_pupil = psi_utils.remove_piston(phase_pupil, self.aperture.shaped)
         # conversion to HCIPy
         residual_phase = hcipy.Field(phase_pupil.ravel(), self.pupilGrid)
         wf_post_ = hcipy.Wavefront(np.exp(1j * residual_phase) * self.aperture,
@@ -379,7 +418,7 @@ class CompassSimInstrument(GenericInstrument):
                 self.phase_residual = fits.getdata(os.path.join(self._input_folder,
                                                            file_wf)) * self.conv2rad
 
-                self.phase_residual = psi.remove_piston(self.phase_residual, self.aperture.shaped)
+                self.phase_residual = psi_utils.remove_piston(self.phase_residual, self.aperture.shaped)
                 self.phase_residual *= self.toto_scaling
 
             # Update water vapour phase
@@ -461,7 +500,7 @@ class CompassSimInstrument(GenericInstrument):
             phase = fits.getdata(os.path.join(self._input_folder, file_wf)) *\
                 self.conv2rad
             # remove piston
-            phase = psi.remove_piston(phase, self.aperture.shaped)
+            phase = psi_utils.remove_piston(phase, self.aperture.shaped)
             phase *= self.toto_scaling
 
             phase_cube[i] = np.copy(phase)
@@ -526,7 +565,7 @@ class DemoCompassSimInstrument(CompassSimInstrument):
         phase_pupil = fits.getdata(os.path.join(self._input_folder, file_wf)) * self.conv2rad
 
         # Remove piston
-        phase_pupil = psi.remove_piston(phase_pupil, self.aperture.shaped)
+        phase_pupil = psi_utils.remove_piston(phase_pupil, self.aperture.shaped)
         # conversion to HCIPy
         residual_phase = hcipy.Field(phase_pupil.ravel(), self.pupilGrid)
         wf_post_ = hcipy.Wavefront(np.exp(1j * residual_phase) * self.aperture,
@@ -622,7 +661,7 @@ class DemoCompassSimInstrument(CompassSimInstrument):
             # phase = fits.getdata(os.path.join(self._input_folder, file_wf)) *\
             #     self.conv2rad
             # # remove piston
-            # phase = psi.remove_piston(phase, self.aperture.shaped)
+            # phase = psi_utils.remove_piston(phase, self.aperture.shaped)
             # phase *= self.toto_scaling
 
             phase_cube[i] = np.copy(phase_pupil)
@@ -638,9 +677,9 @@ class ErisInterfaceOffline(GenericInstrument):
     pass
 
 
-if __name__ == '__main__':
-    from configParser import loadConfiguration
-    config_file = '/Users/orban/Projects/METIS/4.PSI/psi_github/config/config_metis_compass.py'
-    cfg = loadConfiguration(config_file)
-    inst = CompassSimInstrument(cfg.params)
-    inst.build_optical_model()
+# if __name__ == '__main__':
+#     from configParser import loadConfiguration
+#     config_file = '/Users/orban/Projects/METIS/4.PSI/psi_github/config/config_metis_compass.py'
+#     cfg = loadConfiguration(config_file)
+#     inst = CompassSimInstrument(cfg.params)
+#     inst.build_optical_model()
