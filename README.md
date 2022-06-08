@@ -16,16 +16,12 @@ The initial commit of this repository is a copy of [psi](https://github.com/mwil
 
 ## Dependencies
 
-Code requires the following Python packages:
-  * `astropy`
-  * `matplotlib`
-  * `hcipy`
+Code requires the following Python package : `hcipy` and all its dependencies.
 
 The ffmpeg tools are required for generating movies.
 
 [HCIPy](https://github.com/ehpor/hcipy) is a Python software package written and developed by Emiel Por for performing end-to-end simulations of high contrast imaging instruments for astronomy.
 
-It can be installed from PyPI with:
-```
-pip install hcipy
-```
+**HCIPy version currently required: '0.4.1.dev137+gc1ea9e5' (master version of 5/12/2021).**
+
+**Do not pip install but do a git clone instead**
