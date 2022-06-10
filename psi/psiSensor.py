@@ -5,6 +5,7 @@ import os
 import sys
 from datetime import datetime
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import numpy as np
 from astropy.io import fits
 import getpass
@@ -81,7 +82,7 @@ class PsiSensor():
 			if self.cfg.params.psi_correction_mode == 'zern':
 			    self.M2C = hcipy.make_zernike_basis(self.cfg.params.psi_nb_modes, diam,
 										 	   self.inst.pupilGrid,
-										 	   self.cfg.params.psi_start_mode_idx).orthogonalized
+										 	   self.cfg.params.psi_start_mode_idx)#.orthogonalized
 			if self.cfg.params.psi_correction_mode == 'dh':
 				self.logger.warn('Warning psi_start_mode_idx is ignored')
 				self.M2C = hcipy.make_disk_harmonic_basis(self.inst.pupilGrid,
@@ -90,6 +91,7 @@ class PsiSensor():
 
 			self.C2M = hcipy.inverse_tikhonov(self.M2C.transformation_matrix, 1e-3)
 
+		self._ncpa_modes_integrated = 0 # np.zeros(self.cfg.params.psi_nb_modes)
 
 		# Diffraction component to be removed from speckle field in pupil
 		self._diffraction_component= self.inst.aperture
@@ -356,12 +358,13 @@ class PsiSensor():
 
 		# Optional: project on modal basis
 		if self.cfg.params.psi_correction_mode is not 'all':
-			ncpa_estimate, _ = self._projectOnModalBasis(ncpa_estimate)
+			ncpa_estimate, ncpa_modes = self._projectOnModalBasis(ncpa_estimate)
+			return ncpa_estimate, ncpa_modes
+		else:
+			return ncpa_estimate
 
-		return ncpa_estimate
 
-
-	def findNcpaScaling(self, ncpa_estimate):
+	def findNcpaScaling(self, ncpa_estimate, rms_desired=None):
 		'''
 			Compute a NCPA scaling based on the input rms and
 			the expected rms (provided in the config file).
@@ -379,14 +382,17 @@ class PsiSensor():
 		'''
 		conv2nm = self.inst.wavelength / (2 * np.pi) * 1e9
 		rms_estimate = np.std(ncpa_estimate[self.ncpa_mask==1]) * conv2nm
-		rms_expected = self.cfg.params.ncpa_expected_rms
+		if rms_desired is None:
+			rms_expected = self.cfg.params.ncpa_expected_rms
+		else:
+			rms_expected = rms_desired
 
 		scaling = rms_expected / rms_estimate
 
 		return scaling
 
 
-	def next(self, display=True, check=False):
+	def next(self, display=True, check=False, skip_limit=150):
 		'''
 			Perform a complete iteration. This consists in:
 			1. grab the WFS telemetry and the sciences image
@@ -394,6 +400,12 @@ class PsiSensor():
 			3. set the NCPA correction
 			4. (optional) check convergence
 			5. (optional) show progress
+
+			PARAMETERS
+			-----------
+			skip_limit	: float
+				nm rms WFE above which the NCPA estimate will be skipped.
+				For no skip_limit, use 'None'
 		'''
 		# Acquire telemetry buffers
 		nbOfSeconds = 1/self.cfg.params.psi_framerate
@@ -401,21 +413,34 @@ class PsiSensor():
 		science_images_buffer = self.inst.grabScienceImages(nbOfSeconds)
 
 		# Compute NCPA
-		ncpa_estimate = self._fullPsiAlgorithm(wfs_telemetry_buffer,
+		self._ncpa_estimate, self._ncpa_modes = self._fullPsiAlgorithm(wfs_telemetry_buffer,
 										  	   science_images_buffer)
 
 		if self.iter == 0:
 			''' at first iteration, compute a NCPA scaling'''
-			scaling = self.findNcpaScaling(ncpa_estimate)
+			scaling = self.findNcpaScaling(self._ncpa_estimate)
 			self.logger.info('New ncpa scaling is {0}'.format(scaling))
 			self.ncpa_scaling = scaling
 
 		# Arbitratry gain rule
 		# For the first 5 iteration, this gives: [1.0, 0.5, 0.25, 0.125, 0.1]
-		gain = np.max((0.5**self.iter, 0.1))
+		gain = np.max((0.8**self.iter, 0.1))
+		ncpa_command = - gain * self._ncpa_estimate * self.ncpa_mask * self.ncpa_scaling
+
+		self._ncpa_modes_integrated = self._ncpa_modes_integrated +\
+		 	gain * self._ncpa_modes * self.ncpa_scaling
+
+		if skip_limit is not None:
+			ncpa_estimate_rms = np.sqrt(np.sum(self._ncpa_modes**2)) * \
+			 	self.ncpa_scaling * self.inst.wavelength / 6.28 * 1e9
+			# scaling = self.findNcpaScaling(ncpa_command, rms_desired=50)
+			# print('Debug scaling : {0}'.format(scaling))
+			if ncpa_estimate_rms > skip_limit :
+				self.logger.warning('NCPA estimate too large ! Skipping !')
+				ncpa_command=0
 
 		# Send correction
-		self.inst.setNcpaCorrection(- gain * ncpa_estimate * self.ncpa_mask * self.ncpa_scaling)
+		self.inst.setNcpaCorrection(ncpa_command)
 
 		self.iter += 1
 		# ------------#
@@ -429,7 +454,9 @@ class PsiSensor():
 		# Display
 		if display:
 			I_avg = science_images_buffer.mean(0)
-			self.show(I_avg, ncpa_estimate)
+			self.show(I_avg,
+					  self._ncpa_estimate * self.ncpa_scaling,
+					  gain * self._ncpa_modes * self.ncpa_scaling)
 
 	def loop(self):
 		'''
@@ -449,7 +476,7 @@ class PsiSensor():
 		if self.cfg.params.save_loop_statistics:
 			self._save_loop_stats()
 
-	def show(self, I_avg, ncpa_estimate):
+	def show(self, I_avg, ncpa_estimate, ncpa_modes):
 		'''
 			Display the PSF and the NCPA correction
 
@@ -459,7 +486,8 @@ class PsiSensor():
 		# self.fig.gca()
 		# plt.figure()
 		plt.clf()
-		plt.subplot(1, 3, 1)
+		gs = gridspec.GridSpec(2, 3)
+		ax = plt.subplot(gs[0, 0])
 		# hcipy.imshow_field(np.log10(I_sum / nbframes / I_sum.max()),
 		#                    vmin=-4, vmax=-1.5)
 		# hcipy.imshow_field(np.sqrt(I_sum / nbframes))
@@ -467,9 +495,11 @@ class PsiSensor():
 		im, norm = imshow_norm(I_avg, plt.gca(), origin='lower',
 			interval=MinMaxInterval(),
 			stretch=SqrtStretch())
+		plt.axis('off')
+
 
 		plt.title('Average SCI image')
-		plt.subplot(1, 3, 2)
+		ax = plt.subplot(gs[0, 1])
 		if np.size(self.inst.phase_ncpa_correction) == 1:
 		    hcipy.imshow_field(np.zeros(256**2), self.inst.pupilGrid,
 							   cmap='RdBu', mask=self.ncpa_mask)
@@ -478,11 +508,23 @@ class PsiSensor():
 		    hcipy.imshow_field(-self.inst.phase_ncpa_correction,
 								self.inst.pupilGrid,
 								cmap='RdBu', mask=self.ncpa_mask)
+		plt.axis('off')
 		plt.title('NCPA correction')
 
-		plt.subplot(1, 3, 3)
+		ax = plt.subplot(gs[0, 2])
 		hcipy.imshow_field(ncpa_estimate * self.ncpa_mask)
+		plt.axis('off')
 		plt.title('Last NCPA estimate')
+
+		ax = plt.subplot(gs[1, :])
+		if self.cfg.params.psi_correction_mode is not 'all':
+			mm=np.arange(self.cfg.params.psi_start_mode_idx,
+				self.cfg.params.psi_nb_modes + self.cfg.params.psi_start_mode_idx)
+			plt.plot(mm, ncpa_modes, label='last NCPA correction')
+			plt.plot(mm, self._ncpa_modes_integrated, c='k', ls='--', label='integrated')
+			# plt.title('Last NCPA modes')
+			plt.legend()
+			plt.ylim((-0.1, 0.1))
 
 		plt.draw()
 		plt.pause(0.01)
@@ -523,10 +565,10 @@ class PsiSensor():
 			rms_res_all_filt = rms_res_all
 
 		if verbose:
-			self.logger.info('Res [QS, QS+WV] = [{0:.0f}, {1:.0f}]'.\
-				format(rms_res_qs, rms_res_all))
-			self.logger.info('Res. filt. [QS, QS+WV] = [{0:.0f}, {1:.0f}]'.\
-				format(rms_res_qs_filt, rms_res_all_filt))
+			self.logger.info('#{0} : Res [QS, QS+WV] = [{1:.0f}, {2:.0f}]'.\
+				format(self.iter, rms_res_qs, rms_res_all))
+			self.logger.info('#{0} : Res. filt. [QS, QS+WV] = [{1:.0f}, {2:.0f}]'.\
+				format(self.iter, rms_res_qs_filt, rms_res_all_filt))
 
 		loop_stat = [self.iter]
 		loop_stat.append(rms_res_all_filt)
