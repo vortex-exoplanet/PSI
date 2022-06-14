@@ -30,7 +30,7 @@ conf = dict(
     #    1. mode = 'CVC'  for Classical Vortex Coronagraph
     #    (2. mode = 'RAVC' for Ring Apodized Vortex Coronagraph)
     #    (3. mode = 'APP'  for Apodizing Phase Plate)
-    inst_mode = 'ELT',                  # HCI instrument mode
+    inst_mode = 'CVC',                  # HCI instrument mode
     vc_charge = 2,                      # (CVC and RAVC only) vortex topological charge
     vc_vector = False,                  # (CVC and RAVC only) simulate a vector vortex instead of a scalar one
 
@@ -106,7 +106,7 @@ conf = dict(
     #  PSI
     # =========
     psi_framerate = 1,           # [Hz] framerate of the psi correction
-    psi_nb_iter = 35,            # number of iterations.
+    psi_nb_iter = 30,            # number of iterations.
 
     # How is the PSI estimate process before correction:
     #   1. all     : no projection or filtering
