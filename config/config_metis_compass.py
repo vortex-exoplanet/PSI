@@ -30,7 +30,7 @@ conf = dict(
     #    1. mode = 'CVC'  for Classical Vortex Coronagraph
     #    (2. mode = 'RAVC' for Ring Apodized Vortex Coronagraph)
     #    (3. mode = 'APP'  for Apodizing Phase Plate)
-    inst_mode = 'CVC',                  # HCI instrument mode
+    inst_mode = 'ELT',                  # HCI instrument mode
     vc_charge = 2,                      # (CVC and RAVC only) vortex topological charge
     vc_vector = False,                  # (CVC and RAVC only) simulate a vector vortex instead of a scalar one
 
@@ -120,7 +120,7 @@ conf = dict(
 
     # Focal plane filtering
     psi_filt_sigma = 0.05,
-    psi_filt_radius = 15,          # [lbda/D]
+    psi_filt_radius = 10,          # [lbda/D]
 
 
     # ============

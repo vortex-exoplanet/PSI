@@ -69,7 +69,7 @@ class PsiSensor():
 		self.filter_fp = psi_utils.makeFilters(self.inst.focalGrid,
 		                                     "back_prop",
 		                                     sigma=self.cfg.params.psi_filt_sigma,
-		                                     lD = self.cfg.params.psi_filt_radius)
+		                                     lD = self.cfg.params.psi_filt_radius * 2)
 
 
 
@@ -534,7 +534,19 @@ class PsiSensor():
 			TODO use self._speckle_field_t_psi and self._image_t_psi
 				to compute the psiEstimate and see how it converge
 		'''
-		pass
+		nbSteps= self._image_t_psi.shape[0]
+		ncpa_estimates = np.zeros((nbSteps, self._ncpa_estimate.shape[0]))
+		for i in range(1, nbSteps):
+			tmp_estimate = self.ncpa_mask * self._psiCalculation(self._speckle_field_t_psi[:i,:],
+											      self._image_t_psi[:i,:])
+
+			if self.cfg.params.psi_correction_mode is not 'all':
+				ncpa_estimate, ncpa_modes = self._projectOnModalBasis(tmp_estimate)
+				ncpa_estimates[i,:] = ncpa_estimate
+			else:
+				ncpa_estimates[i,:] = ncpa_estimate
+
+		return ncpa_estimates
 
 	def evaluateSensorEstimate(self, verbose=True):
 		'''
