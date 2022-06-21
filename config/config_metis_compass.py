@@ -106,7 +106,7 @@ conf = dict(
     #  PSI
     # =========
     psi_framerate = 1,           # [Hz] framerate of the psi correction
-    psi_nb_iter = 35,            # number of iterations.
+    psi_nb_iter = 30,            # number of iterations.
 
     # How is the PSI estimate process before correction:
     #   1. all     : no projection or filtering
@@ -117,10 +117,12 @@ conf = dict(
     psi_nb_modes = 100,           # (if modal) nb of modes
     psi_start_mode_idx = 4,        # (if modal) index of first mode. with Zernike, 4 means no piston and tip/tilt
 
+    psi_skip_limit = None,         # [nm rms] value above which the psi_correction will be skipped.
+                                  # set to None if no skip limit
 
     # Focal plane filtering
     psi_filt_sigma = 0.05,
-    psi_filt_radius = 15,          # [lbda/D]
+    psi_filt_radius = 10,          # [lbda/D]
 
 
     # ============

@@ -69,7 +69,7 @@ class PsiSensor():
 		self.filter_fp = psi_utils.makeFilters(self.inst.focalGrid,
 		                                     "back_prop",
 		                                     sigma=self.cfg.params.psi_filt_sigma,
-		                                     lD = self.cfg.params.psi_filt_radius)
+		                                     lD = self.cfg.params.psi_filt_radius * 2)
 
 
 
@@ -120,6 +120,7 @@ class PsiSensor():
 		# -- [WIP] Scaling of ncpa correction
 		self.ncpa_scaling =  1 #1.e6  # NB: this is not the same as cfg.params.ncpa_scaling !!
 
+		self._skip_limit = self.cfg.params.psi_skip_limit
 
 		self.iter = 0 # iteration index of PSI
 		self._loop_stats = []
@@ -392,7 +393,7 @@ class PsiSensor():
 		return scaling
 
 
-	def next(self, display=True, check=False, skip_limit=150):
+	def next(self, display=True, check=False):
 		'''
 			Perform a complete iteration. This consists in:
 			1. grab the WFS telemetry and the sciences image
@@ -430,14 +431,14 @@ class PsiSensor():
 		self._ncpa_modes_integrated = self._ncpa_modes_integrated +\
 		 	gain * self._ncpa_modes * self.ncpa_scaling
 
-		if skip_limit is not None:
+		if self._skip_limit is not None:
 			ncpa_estimate_rms = np.sqrt(np.sum(self._ncpa_modes**2)) * \
 			 	self.ncpa_scaling * self.inst.wavelength / 6.28 * 1e9
 			# scaling = self.findNcpaScaling(ncpa_command, rms_desired=50)
 			# print('Debug scaling : {0}'.format(scaling))
 			if ncpa_estimate_rms > skip_limit :
 				self.logger.warning('NCPA estimate too large ! Skipping !')
-				ncpa_command=0
+				ncpa_command= 0 * ncpa_command
 
 		# Send correction
 		self.inst.setNcpaCorrection(ncpa_command)
@@ -534,7 +535,19 @@ class PsiSensor():
 			TODO use self._speckle_field_t_psi and self._image_t_psi
 				to compute the psiEstimate and see how it converge
 		'''
-		pass
+		nbSteps= self._image_t_psi.shape[0]
+		ncpa_estimates = np.zeros((nbSteps, self._ncpa_estimate.shape[0]))
+		for i in range(1, nbSteps):
+			tmp_estimate = self.ncpa_mask * self._psiCalculation(self._speckle_field_t_psi[:i,:],
+											      self._image_t_psi[:i,:])
+
+			if self.cfg.params.psi_correction_mode is not 'all':
+				ncpa_estimate, ncpa_modes = self._projectOnModalBasis(tmp_estimate)
+				ncpa_estimates[i,:] = ncpa_estimate
+			else:
+				ncpa_estimates[i,:] = ncpa_estimate
+
+		return ncpa_estimates
 
 	def evaluateSensorEstimate(self, verbose=True):
 		'''

@@ -9,7 +9,6 @@ psi_sensor.setup()
 # Test: doing one iteration
 psi_sensor.logger.info('Inputs:')
 psi_sensor.evaluateSensorEstimate()
-psi_sensor.ncpa_scaling = 1e-3
 # psi_sensor.next()
 # psi_sensor.evaluateSensorEstimate()
 # psi_sensor.next()

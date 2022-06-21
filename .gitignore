@@ -141,5 +141,6 @@ data/_archives/
 /data/pupil/eso
 !data/pupil/ELT_fullM1.fits
 !data/pupil/ls_CVC_L_285_dRext=0.0209_dRint=0.09_dRspi=0.0245.fits
-#!data/pupil/ls_CVC_N2_119_dRext=0.0268_dRint=0.09_dRspi=0.0357.fits
-#!data/pupil/ls_RAVC_L_285_dRext=0.0477_dRint=0.02_dRspi=0.0249.fits
+!data/pupil/ls_CVC_N2_119_dRext=0.0268_dRint=0.09_dRspi=0.0357.fits
+!data/pupil/ls_RAVC_L_285_dRext=0.0477_dRint=0.02_dRspi=0.0249.fits
+!data/pupil/apo_ring_r=0.5190_t=0.7909.fits
