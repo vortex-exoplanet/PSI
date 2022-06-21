@@ -519,10 +519,14 @@ class CompassSimInstrument(GenericInstrument):
         '''
         if self._start_time_wfs != self._start_time_sci_buffer:
             self.logger.warn('Start buffers not sync')
-            return 0
+            self.logger.debug('Start WFS buffer is {0}'.format(self._start_time_wfs))
+            self.logger.debug('Start SCI buffer is {0}'.format(self._start_time_sci_buffer))
+            # return 0
         if self._end_time_wfs != self._end_time_sci_buffer:
             self.logger.warn('End buffers not sync')
-            return 0
+            self.logger.debug('End WFS buffer is {0}'.format(self._end_time_wfs))
+            self.logger.debug('End SCI buffer is {0}'.format(self._end_time_sci_buffer))
+            # return 0
 
         self._current_time_ms = np.copy(self._end_time_wfs)
 
