@@ -117,7 +117,7 @@ conf = dict(
     psi_nb_modes = 100,           # (if modal) nb of modes
     psi_start_mode_idx = 4,        # (if modal) index of first mode. with Zernike, 4 means no piston and tip/tilt
 
-    psi_skip_limit = None         # [nm rms] value above which the psi_correction will be skipped.
+    psi_skip_limit = None,         # [nm rms] value above which the psi_correction will be skipped.
                                   # set to None if no skip limit
 
     # Focal plane filtering

@@ -393,7 +393,7 @@ class PsiSensor():
 		return scaling
 
 
-	def next(self, display=True, check=False, skip_limit=self._skip_limit):
+	def next(self, display=True, check=False):
 		'''
 			Perform a complete iteration. This consists in:
 			1. grab the WFS telemetry and the sciences image
@@ -431,7 +431,7 @@ class PsiSensor():
 		self._ncpa_modes_integrated = self._ncpa_modes_integrated +\
 		 	gain * self._ncpa_modes * self.ncpa_scaling
 
-		if skip_limit is not None:
+		if self._skip_limit is not None:
 			ncpa_estimate_rms = np.sqrt(np.sum(self._ncpa_modes**2)) * \
 			 	self.ncpa_scaling * self.inst.wavelength / 6.28 * 1e9
 			# scaling = self.findNcpaScaling(ncpa_command, rms_desired=50)
