@@ -120,6 +120,7 @@ class PsiSensor():
 		# -- [WIP] Scaling of ncpa correction
 		self.ncpa_scaling =  1 #1.e6  # NB: this is not the same as cfg.params.ncpa_scaling !!
 
+		self._skip_limit = self.cfg.params.psi_skip_limit
 
 		self.iter = 0 # iteration index of PSI
 		self._loop_stats = []
@@ -392,7 +393,7 @@ class PsiSensor():
 		return scaling
 
 
-	def next(self, display=True, check=False, skip_limit=150):
+	def next(self, display=True, check=False, skip_limit=self._skip_limit):
 		'''
 			Perform a complete iteration. This consists in:
 			1. grab the WFS telemetry and the sciences image
@@ -437,7 +438,7 @@ class PsiSensor():
 			# print('Debug scaling : {0}'.format(scaling))
 			if ncpa_estimate_rms > skip_limit :
 				self.logger.warning('NCPA estimate too large ! Skipping !')
-				ncpa_command=0
+				ncpa_command= 0 * ncpa_command
 
 		# Send correction
 		self.inst.setNcpaCorrection(ncpa_command)

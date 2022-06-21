@@ -5,6 +5,7 @@ import os
 import shutil
 import datetime
 import getpass
+import colored
 
 class LazyLogger(object):
     def __init__(self, name=''):
@@ -12,22 +13,27 @@ class LazyLogger(object):
         pass
 
     def debug(self, msg):
-        print("{0} - [Debug]  : ".format(self._name), msg)
+        print(("{0} - " + colored.fg("blue") +
+               "[Debug]: " + colored.fg("black")).format(self._name) , msg)
 
     def notice(self, msg):
-        print("{0} - [Notice] : ".format(self._name), msg)
+        print(("{0} - " + colored.fg("green") +
+               "[Info]: " + colored.fg("black")).format(self._name) , msg)
 
     def info(self, msg):
         self.notice(msg)
 
     def warning(self, msg):
-        print("{0} - [Warning]: ".format(self._name), msg)
+        print(("{0} - " + colored.fg("orange_1") +
+               "[Warning]: " + colored.fg("black")).format(self._name) , msg)
 
     def warn(self, msg):
-        print("{0} - [Warning]: ".format(self._name), msg)
+        print(("{0} - " + colored.fg("orange_1") +
+               "[Warning]: " + colored.fg("black")).format(self._name) , msg)
 
     def error(self, msg):
-        print("{0} - [Error]  : ".format(self._name), msg)
+        print(("{0} - " + colored.fg("red") +
+               "[Error]: " + colored.fg("black")).format(self._name) , msg)
 
 
 def timeit(func):
