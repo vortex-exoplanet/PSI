@@ -179,6 +179,7 @@ class CompassSimInstrument(GenericInstrument):
         # by default include residual turbulence phase screens
         self.include_residual_turbulence = True
         self.phase_residual = 0
+        # self.phase_residual = hcipy.Field(0.0, self.pupilGrid).shaped
 
         self.ncpa_dynamic = conf.ncpa_dynamic
         if self.ncpa_dynamic:
@@ -295,7 +296,8 @@ class CompassSimInstrument(GenericInstrument):
         size_pupil_grid = int(self.pupilGrid.shape[0])
         self.phase_ncpa = psi_utils.loadNCPA(self.aperture, size_pupil_grid,
                                        file_=ncpa_file,
-                                       folder_=self._input_folder_ncpa)
+                                       folder_=self._input_folder_ncpa,
+                                       wavelength_=self.wavelength)
         self.phase_ncpa *= self.ncpa_scaling
         # # compute min max for plot
         # ncpa_min = - np.ptp(self.phase_ncpa) / 2
@@ -311,7 +313,8 @@ class CompassSimInstrument(GenericInstrument):
             self.phase_ncpa = psi_utils.loadNCPA(self.aperture,
                                            size_pupil_grid,
                                            file_=ncpa_file,
-                                           folder_=self._input_folder_ncpa)
+                                           folder_=self._input_folder_ncpa,
+                                           wavelength_=self.wavelength)
             self.phase_ncpa *= self.ncpa_scaling
             self._ncpa_index += 1
 
@@ -325,6 +328,7 @@ class CompassSimInstrument(GenericInstrument):
             psi_utils.process_screen(self.phase_wv_cube[0],
                                size_pupil_grid,
                                self.aperture, rotate=True)
+        self.phase_wv *= self.wv_scaling
         # folder_wv = '/Users/orban/Projects/METIS/4.PSI/legacy_TestArea/WaterVapour/phases/'
         # file_wv = "cube_Cbasic_20210504_600s_100ms_0piston_meters_scao_only_285_WVLonly_qacits.fits"
         # wave_vapour_cube = fits.getdata(os.path.join(folder_wv, file_wv)) * \
@@ -341,6 +345,7 @@ class CompassSimInstrument(GenericInstrument):
                 psi_utils.process_screen(self.phase_wv_cube[self._wv_index],
                                    size_pupil_grid,
                                    self.aperture, rotate=True)
+            self.phase_wv *= self.wv_scaling
             self._wv_index += 1
 
 
@@ -572,6 +577,7 @@ class DemoCompassSimInstrument(CompassSimInstrument):
         phase_pupil = psi_utils.remove_piston(phase_pupil, self.aperture.shaped)
         # conversion to HCIPy
         residual_phase = hcipy.Field(phase_pupil.ravel(), self.pupilGrid)
+        # TODO remove the self.wavelength (and make sure does not affect the result -- should not of course)
         wf_post_ = hcipy.Wavefront(np.exp(1j * residual_phase) * self.aperture,
                                    self.wavelength)
         # Setting number of photons
