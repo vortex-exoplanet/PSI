@@ -10,9 +10,9 @@ Welcome to PSI's documentation!
    :maxdepth: 3
    :caption: Contents:
 
-   psiSensor.rst
-   instruments.rst
-   configParser.rst
+   psiSensor
+   instruments
+   configParser
 
 
 Indices and tables

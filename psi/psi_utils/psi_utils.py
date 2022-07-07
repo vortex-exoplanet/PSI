@@ -114,7 +114,8 @@ def loadNCPA(aperture_,
              size_,
              file_="DIFF_rep_1_field_0.fits",
              folder_="/Users/matt/Documents/METIS/TestArea/fepsi/NCPA_Tibor/",
-             wavelength_=3e-6):
+             wavelength_=3e-6,
+             conv2m = 1e-3):
     """The NCPA from Tibor come in 512 so need to be resized. Their aperture is slightly smaller than
     COMPASS, 8pxs to the edge after resizing rather than 6px. +6 is then for enlarging a bit further and
     then use crop to bring it back down to the right size.
@@ -124,9 +125,11 @@ def loadNCPA(aperture_,
     HCIPy needs radians
     Tibor phase screens are expressed in [mm]
     -> hence load_NCPA includes a (1e3 1e-6) = 1e-3 to convert millimeters to meters
+
+    TODO units conversion are hardcoded
     """
     ncpa_ = fits.getdata(os.path.join(folder_, file_)) * 2 * np.pi / \
-        wavelength_ * 1e3 * 1e-6  # mm * rad/um * m/mm * um/m
+        wavelength_ * conv2m #1e3 * 1e-6  # mm * rad/um * m/mm * um/m
     ncpa_ = process_screen(ncpa_, size_+6, aperture_, rotate=True, ncpa_=True)
     ncpa_ = crop_img(ncpa_, (size_, size_))
     ncpa_ = ncpa_.ravel() * aperture_

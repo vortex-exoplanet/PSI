@@ -38,6 +38,7 @@ class GenericInstrument():
 
         self.phase_ncpa = hcipy.Field(0.0, self.pupilGrid)         # knowledge only in Simulation
         self.phase_wv = hcipy.Field(0.0, self.pupilGrid)           # knowledge only in Simulation
+        self.phase_wv_integrated = hcipy.Field(0.0, self.pupilGrid)           # knowledge only in Simulation
         self.phase_ncpa_correction = hcipy.Field(0.0, self.pupilGrid)  # NCPA correction applied
 
         pass
@@ -75,14 +76,14 @@ class GenericInstrument():
         self._aperture = aper
 
     @abc.abstractmethod
-    def grabWfsTelemetry(self):
+    def grabWfsTelemetry(self, nbOfSeconds):
         '''
         Grab wavefront sensor telemetry and returns wavefront buffer
         '''
         pass
 
     @abc.abstractmethod
-    def grabScienceImages(self):
+    def grabScienceImages(self, nbOfSeconds):
         '''
         Grab science images and returns science images buffer
         '''
@@ -179,6 +180,7 @@ class CompassSimInstrument(GenericInstrument):
         # by default include residual turbulence phase screens
         self.include_residual_turbulence = True
         self.phase_residual = 0
+        # self.phase_residual = hcipy.Field(0.0, self.pupilGrid).shaped
 
         self.ncpa_dynamic = conf.ncpa_dynamic
         if self.ncpa_dynamic:
@@ -295,7 +297,8 @@ class CompassSimInstrument(GenericInstrument):
         size_pupil_grid = int(self.pupilGrid.shape[0])
         self.phase_ncpa = psi_utils.loadNCPA(self.aperture, size_pupil_grid,
                                        file_=ncpa_file,
-                                       folder_=self._input_folder_ncpa)
+                                       folder_=self._input_folder_ncpa,
+                                       wavelength_=self.wavelength)
         self.phase_ncpa *= self.ncpa_scaling
         # # compute min max for plot
         # ncpa_min = - np.ptp(self.phase_ncpa) / 2
@@ -311,7 +314,8 @@ class CompassSimInstrument(GenericInstrument):
             self.phase_ncpa = psi_utils.loadNCPA(self.aperture,
                                            size_pupil_grid,
                                            file_=ncpa_file,
-                                           folder_=self._input_folder_ncpa)
+                                           folder_=self._input_folder_ncpa,
+                                           wavelength_=self.wavelength)
             self.phase_ncpa *= self.ncpa_scaling
             self._ncpa_index += 1
 
@@ -325,6 +329,8 @@ class CompassSimInstrument(GenericInstrument):
             psi_utils.process_screen(self.phase_wv_cube[0],
                                size_pupil_grid,
                                self.aperture, rotate=True)
+        self.phase_wv *= self.wv_scaling
+        self.phase_wv_integrated = self.phase_wv
         # folder_wv = '/Users/orban/Projects/METIS/4.PSI/legacy_TestArea/WaterVapour/phases/'
         # file_wv = "cube_Cbasic_20210504_600s_100ms_0piston_meters_scao_only_285_WVLonly_qacits.fits"
         # wave_vapour_cube = fits.getdata(os.path.join(folder_wv, file_wv)) * \
@@ -341,6 +347,7 @@ class CompassSimInstrument(GenericInstrument):
                 psi_utils.process_screen(self.phase_wv_cube[self._wv_index],
                                    size_pupil_grid,
                                    self.aperture, rotate=True)
+            self.phase_wv *= self.wv_scaling
             self._wv_index += 1
 
 
@@ -348,6 +355,17 @@ class CompassSimInstrument(GenericInstrument):
     def grabScienceImages(self, nbOfPastSeconds):
         '''
             Grab a buffer of science images
+
+            Parameters
+            ------------
+            nbOfPastSeconds : float
+                number of seconds of science images (can be equivalent to one or several images)
+
+            Returns
+            --------
+            image_buffer  : numpy ndarray
+                science image buffer of dimension (nbOfSciImages, nx, ny)
+
         '''
         self.nbOfSciImages = int(nbOfPastSeconds / self.sci_exptime)
         assert self.nbOfSciImages <= nbOfPastSeconds / self.sci_exptime
@@ -361,8 +379,14 @@ class CompassSimInstrument(GenericInstrument):
         # re-initialize timer of single dit
         self._start_time_last_sci_dit = np.copy(self._start_time_sci_buffer)
         self._end_time_last_sci_dit = np.copy(self._start_time_sci_buffer)
+
+        if self.include_water_vapour :
+            self.phase_wv_integrated = 0
+            self.nb_wv_integrated = 0
         for i in range(self.nbOfSciImages):
             image_buffer[i] = self._grabOneScienceImage()
+        if self.include_water_vapour :
+            self.phase_wv_integrated /= self.nb_wv_integrated
 
         self._end_time_sci_buffer = np.copy(self._end_time_last_sci_dit)
         return image_buffer
@@ -424,6 +448,8 @@ class CompassSimInstrument(GenericInstrument):
             # Update water vapour phase
             if self.include_water_vapour :
                 self._update_water_vapour(self._start_time_last_sci_dit + timeIdxInMs[i])
+                self.phase_wv_integrated += self.phase_wv
+                self.nb_wv_integrated += 1
 
             # Update NCPA phase
             if self.ncpa_dynamic :
@@ -470,8 +496,17 @@ class CompassSimInstrument(GenericInstrument):
 
     def grabWfsTelemetry(self, nbOfPastSeconds):
         '''
+        Grab a buffer of WFS telemetry
+
+        Parameters
+        ------------
+        nbOfPastSeconds : float
+            number of seconds of science images (can be equivalent to one or several images)
+
         Returns
-                phase cube in units of radian
+        --------
+        phase_cube  : numpy ndarray
+            phase cube in units of radian
         '''
         # self._compass_start_time=2011 # COMPASS 0 indexing in msec
 
@@ -509,20 +544,42 @@ class CompassSimInstrument(GenericInstrument):
         return phase_cube
 
     def setNcpaCorrection(self, phase):
+        '''
+            Apply NCPA correction
+
+            Parameters
+            ----------
+            phase : numpy ndarray
+                phase correction to be applied
+        '''
         self.phase_ncpa_correction = self.phase_ncpa_correction + phase
 
     def synchronizeBuffers(self, wfs_telemetry_buffer, sci_image_buffer):
         '''
+            Synchronize science and wfs telemetry buffers
+
+            Parameters
+            ----------
+            wfs_telemetry_buffer : numpy ndarray
+                WFS telemetry buffer as returned by 'grabWfsTelemetry'
+            sci_image_buffer : numpy ndarray
+                Science image buffer as returned by 'grabScienceImages'
+
+
             Note:
                 wfs_telemetry_buffer & sci_image_buffer are actually not used here.
                 To be realistic, one could correlate the tip-tilt in both to sync them.
         '''
         if self._start_time_wfs != self._start_time_sci_buffer:
             self.logger.warn('Start buffers not sync')
-            return 0
+            self.logger.debug('Start WFS buffer is {0}'.format(self._start_time_wfs))
+            self.logger.debug('Start SCI buffer is {0}'.format(self._start_time_sci_buffer))
+            # return 0
         if self._end_time_wfs != self._end_time_sci_buffer:
             self.logger.warn('End buffers not sync')
-            return 0
+            self.logger.debug('End WFS buffer is {0}'.format(self._end_time_wfs))
+            self.logger.debug('End SCI buffer is {0}'.format(self._end_time_sci_buffer))
+            # return 0
 
         self._current_time_ms = np.copy(self._end_time_wfs)
 
@@ -534,6 +591,11 @@ class CompassSimInstrument(GenericInstrument):
         return telemetry_indexing
 
     def getNumberOfPhotons(self):
+        '''
+            Returns
+            --------
+            Number of photons for a single science exposure
+        '''
         return self.num_photons
 
 class DemoCompassSimInstrument(CompassSimInstrument):
@@ -568,6 +630,7 @@ class DemoCompassSimInstrument(CompassSimInstrument):
         phase_pupil = psi_utils.remove_piston(phase_pupil, self.aperture.shaped)
         # conversion to HCIPy
         residual_phase = hcipy.Field(phase_pupil.ravel(), self.pupilGrid)
+        # TODO remove the self.wavelength (and make sure does not affect the result -- should not of course)
         wf_post_ = hcipy.Wavefront(np.exp(1j * residual_phase) * self.aperture,
                                    self.wavelength)
         # Setting number of photons
@@ -631,8 +694,17 @@ class DemoCompassSimInstrument(CompassSimInstrument):
 
     def grabWfsTelemetry(self, nbOfPastSeconds):
         '''
+        Grab a buffer of WFS telemetry
+
+        Parameters
+        ------------
+        nbOfPastSeconds : float
+            number of seconds of science images (can be equivalent to one or several images)
+
         Returns
-                phase cube in units of radian
+        --------
+        phase_cube  : numpy ndarray
+            phase cube in units of radian
         '''
         # self._compass_start_time=2011 # COMPASS 0 indexing in msec
 
@@ -670,10 +742,18 @@ class DemoCompassSimInstrument(CompassSimInstrument):
         return phase_cube
 
 class HcipySimInstrument(GenericInstrument):
+    '''
+    Not implemented
+    '''
+    # raise NotImplementedError()
     pass
 
 
 class ErisInterfaceOffline(GenericInstrument):
+    '''
+    Not implemented
+    '''
+    # raise NotImplementedError()
     pass
 
 

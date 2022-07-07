@@ -51,7 +51,6 @@ class Parameters(object):
         ``ncpa_dynamic``            -
         ``ncpa_sampling``           -
         ``ncpa_scaling``            -
-        ``ncpa_expected_rms``       -
         ``ncpa_folder``             -
         ``ncpa_prefix``             -
         ``turb_folder``             -
@@ -71,6 +70,9 @@ class Parameters(object):
         self.logger = logger
 
     def readfile(self):
+        '''
+        Read configuration file -> create `conf` namespace
+        '''
 
         #Exec the config file, which should contain a dict ``simConfiguration``
         try:
@@ -85,11 +87,34 @@ class Parameters(object):
         self.params = conf
 
     def check_parameters(self):
+        '''
+            Performs a number of sanity checks on the configuration parameters
+        '''
+        # TODO had a check that the Lyot stop is for the correct mode and band
+        #       look at the file name and search for strings
+
         # check, based on the band, that the zeropoint is according to defined 'constants'
         #  otherwise print a 'warning'
+        if self.params.inst_mode == 'CVC':
+            # if self.params.band == 'L':
+            if os.path.basename(self.params.f_lyot_stop)[0:8] != 'ls_CVC_L':
+                self.logger.warn(('Lyot stop fname does not seem to match for {0}'
+                             'Please check the filename').format(self.params.inst_mode))
+            # if self.params.band == 'N':
+            #     if os.path.basename(self.params.f_lyot_stop)[0:8] != 'ls_CVC_N':
+            #         self.logger(('Lyot stop fname does not seem to match for {0}.'
+            #                      ' Please check the filename').format(self.params.inst_mode))
+        elif self.params.inst_mode == 'RAVC':
+            # if self.params.band == 'L':
+            if os.path.basename(self.params.f_lyot_stop)[0:9] != 'ls_RAVC_L':
+                self.logger.warn(('Lyot stop fname does not seem to match for {0}'
+                             ' Please check the filename').format(self.params.inst_mode))
+            # if self.params.band == 'N':
+            #     if os.path.basename(self.params.f_lyot_stop)[0:8] != 'ls_RAVC_N':
+            #         self.logger(('Lyot stop fname does not seem to match for {0}.'
+            #                      ' Please check the filename').format(self.params.inst_mode))
 
         assert self.params.det_size >= self.params.psi_filt_radius
-
 
         # PSI correction mode checks
         if self.params.psi_correction_mode == 'zern':
@@ -119,6 +144,9 @@ class Parameters(object):
             self.params.save_results = True
 
     def compute_parameters(self):
+        '''
+        Compute some parameters based on the configuration file parameters
+        '''
         self.params.nb_ao_frames_per_science = int(self.params.dit / \
             (self.params.ao_frame_decimation / self.params.ao_framerate))
 
@@ -131,6 +159,9 @@ class Parameters(object):
 
 
 def loadConfiguration(filename):
+        '''
+        Load the configuration file and return a configuration object.
+        '''
         cfg_obj = Parameters(filename)
 
         cfg_obj.readfile()

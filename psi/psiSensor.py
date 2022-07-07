@@ -5,6 +5,7 @@ import os
 import sys
 from datetime import datetime
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import numpy as np
 from astropy.io import fits
 import getpass
@@ -61,14 +62,14 @@ class PsiSensor():
 		# self.inst = getattr(instruments,
 		# 					self.cfg.params.instrument)(self.cfg.params)
 		self.inst = eval(self.cfg.params.instrument)(self.cfg.params)
-		importlib.import_module
+		# importlib.import_module
 		self.inst.build_optical_model()
 
 		# # Build focal plane filter for PSI
 		self.filter_fp = psi_utils.makeFilters(self.inst.focalGrid,
 		                                     "back_prop",
 		                                     sigma=self.cfg.params.psi_filt_sigma,
-		                                     lD = self.cfg.params.psi_filt_radius)
+		                                     lD = self.cfg.params.psi_filt_radius * 2)
 
 
 
@@ -81,7 +82,7 @@ class PsiSensor():
 			if self.cfg.params.psi_correction_mode == 'zern':
 			    self.M2C = hcipy.make_zernike_basis(self.cfg.params.psi_nb_modes, diam,
 										 	   self.inst.pupilGrid,
-										 	   self.cfg.params.psi_start_mode_idx).orthogonalized
+										 	   self.cfg.params.psi_start_mode_idx)#.orthogonalized
 			if self.cfg.params.psi_correction_mode == 'dh':
 				self.logger.warn('Warning psi_start_mode_idx is ignored')
 				self.M2C = hcipy.make_disk_harmonic_basis(self.inst.pupilGrid,
@@ -90,10 +91,14 @@ class PsiSensor():
 
 			self.C2M = hcipy.inverse_tikhonov(self.M2C.transformation_matrix, 1e-3)
 
+		self._ncpa_modes_integrated = 0 # np.zeros(self.cfg.params.psi_nb_modes)
 
 		# Diffraction component to be removed from speckle field in pupil
-		self._diffraction_component= self.inst.aperture
-
+		if self.cfg.params.inst_mode == 'CVC':
+			# TODO : also check that this should be the component in the RAVC mode
+			self._diffraction_component= self.inst.lyot_stop_mask
+		else:
+			self._diffraction_component= self.inst.aperture
 
 		# Holders for PSI-related cubes
 		N = int(np.round(1 / (self.cfg.params.dit * self.cfg.params.psi_framerate)))
@@ -115,9 +120,13 @@ class PsiSensor():
 		# 	mask = inst.aperture
 		self.ncpa_mask = self.inst.aperture
 
+
+
 		# -- [WIP] Scaling of ncpa correction
 		self.ncpa_scaling =  1 #1.e6  # NB: this is not the same as cfg.params.ncpa_scaling !!
+		self._ncpa_correction_long_term = 0 # 24/06/2022 -- for WV integrating
 
+		self._skip_limit = self.cfg.params.psi_skip_limit
 
 		self.iter = 0 # iteration index of PSI
 		self._loop_stats = []
@@ -143,18 +152,29 @@ class PsiSensor():
 	def _save_loop_stats(self):
 		'''
 			Saving loop statistics to file
+
+			Added the 01/07/2022:
+					loop_stat.append(rms_wv_integrated)  # input WV average over 1/psi_framertae -- on the modes
+					loop_stat.append(rms_res_all_bis_filt)    # rms all considering the average WV and not the instantaneoius
+					loop_stat.append(rms_res_static_NCPA_filt)  # long-term average of the correction compared to the QS part
+
 		'''
 		data = np.array(self._loop_stats)
 		np.savetxt(os.path.join(self._directory, 'loopStats.csv'),
 				  data,
-				  header ='units are nm \n it \t wfe_all_f \t wfe_qs_f \t wfe_all \t wfe_qs',
-				  fmt=['%i' , '%f', '%f', '%f', '%f'],
+				  header ='units are nm \n it \t wfe_all_f \t wfe_qs_f \t wfe_all \t wfe_qs \t input_wv_avg \t wfe_all_f_avg \t wfe_static',
+				  fmt=['%i' , '%f', '%f', '%f', '%f', '%f', '%f', '%f'],
 				  delimiter= '\t')
 
 	def _store_phase_screens_to_file(self, i):
 		'''
 			Storing phase screens to fits file.
 			Units of phase is nm
+
+			Parameters
+			----------
+			 i : int
+			 	index appended to the fits filename
 
 			TODO populate the header with useful information
 		'''
@@ -203,6 +223,11 @@ class PsiSensor():
 		images_fp : array
 			science images
 
+		Returns
+		--------
+		ncpa_estimate: array
+			NCPA estimation provided by PSI (no modal projection)
+
 		'''
 		# PSI calculation
 		phi_I = np.sum(speckle_fields_fp * images_fp, axis=0)
@@ -237,14 +262,16 @@ class PsiSensor():
 		# psi_estimate = (phi_I) / (g * (phi_2 ))
 
 
-		psi_estimate = hcipy.Field(psi_estimate, self.inst.focalGrid)
-		wf = hcipy.Wavefront(psi_estimate * self.filter_fp)
+		self._psi_estimate = hcipy.Field(psi_estimate, self.inst.focalGrid)
+		wf = hcipy.Wavefront(self._psi_estimate * self.filter_fp)
 
 		# Propagate estimation back to the entrance pupil
 		pup = self.inst.optical_model.backward(wf)
 			## -- alternative for the SVC charge 2 --
 			# wf.electric_field *= np.exp(-2j * inst.focalGrid.as_('polar').theta)
 			# pup = inst._prop.backward(wf)
+
+		self._estimated_wavefront = pup
 
 		# Small phase hypothesis
 		ncpa_estimate = pup.electric_field.imag
@@ -260,8 +287,8 @@ class PsiSensor():
 			---------
 			ncpa_estimate	: NCPA phase map
 
-			Return
-			------
+			Returns
+			--------
 			ncpa_estimate	: phase map filtered to a finite set of modes
 			ncpa_modes		: modal coefficients vector
 
@@ -269,6 +296,9 @@ class PsiSensor():
 		# Project ncpa estimate on finite set of modes
 		if self.cfg.params.inst_mode == 'CVC' or self.cfg.params.inst_mode == 'RAVC':
 			proj_mask = self.inst.lyot_stop_mask
+			# adding binary transformation for the mask. This gives better results in N-band CVC at least
+			proj_mask[proj_mask<0.5] = 0
+			proj_mask[proj_mask>=0.5]=1
 		else:
 			proj_mask = self.inst.aperture
 		ncpa_modes      = self.C2M.dot(ncpa_estimate * proj_mask)
@@ -292,7 +322,26 @@ class PsiSensor():
 		wfs_wavefront_hcipy = hcipy.Field(wfs_telemetry_buffer_1d, self.inst.pupilGrid)
 		Efield = hcipy.Wavefront(self.inst.aperture * np.exp(1j * wfs_wavefront_hcipy) \
 			- self._diffraction_component)
+		# Efield = hcipy.Wavefront(self.inst.aperture * np.exp(1j * wfs_wavefront_hcipy) )
 		Efield.total_power = self.nbOfPhotons  * nf
+
+		# #----------
+		# # [2022-06-22] revising the flux scaling
+		# # flux-perfect and flux_speckle could be computed only once
+		# # this does not work yet ...
+		# Efield_perfect = hcipy.Wavefront(self._diffraction_component)
+		# flux_perfect = np.copy(Efield_perfect.total_power)
+		# Efield_speckle = hcipy.Wavefront(self.inst.aperture * 1j * wfs_wavefront_hcipy[0] )
+		# flux_speckle = np.copy(Efield_speckle.total_power)
+		#
+		# Efield = hcipy.Wavefront(self.inst.aperture * np.exp(1j * wfs_wavefront_hcipy) \
+		# 	- self._diffraction_component)
+		# Efield.total_power = self.nbOfPhotons  * nf * (flux_speckle / flux_perfect)
+		# # Efield = hcipy.Wavefront(Efield_telemetry.electric_field - Efield_perfect.electric_field)
+		# self.logger.debug('Efield total power= {0} vs Efield_perfect = {1}, Efield_telemetry = {2} '.format(Efield.total_power,
+		# 	Efield_perfect.total_power, Efield_speckle.total_power))
+		# #--------
+
 
 		# Efield_perfect = hcipy.Wavefront(self._diffraction_component)
 		# Efield_perfect.total_power = self.nbOfPhotons / nf
@@ -308,22 +357,23 @@ class PsiSensor():
 	@timeit
 	def _fullPsiAlgorithm(self, wfs_telemetry_buffer, science_images_buffer):
 		'''
-			Complete PSI algorithm containing the following steps:
-			1. synchronization of the WFS phase telemetry and the science images buffers
-			2. Computation of the speckle fields based on the WFS telemetry.
-				This corresponds to the "reference beam" :math:`\psi`
-			3. PSI algebra using the :math:`\psi` buffer, and the :math:`I` (images) buffer
-			4. Optional projection on a finite set of modes
+		Complete PSI algorithm containing the following steps:
 
-			Parameters
-			----------
-			wfs_telemetry_buffer
+		1. synchronization of the WFS phase telemetry and the science images buffers
+		2. Computation of the speckle fields based on the WFS telemetry.
+			This corresponds to the "reference beam" :math:`\psi`
+		3. PSI algebra using the :math:`\psi` buffer, and the :math:`I` (images) buffer
+		4. Optional projection on a finite set of modes
 
-			science_images_buffer
+		Parameters
+		----------
+		wfs_telemetry_buffer
 
-			Returns
-			-------
-			ncpa_estimate
+		science_images_buffer
+
+		Returns
+		-------
+		ncpa_estimate
 		'''
 		# Synchronize the WFS telemetry buffer and science image buffer
 		# Telemetry_indexing is used for sync and slicing of the wfs telemetry buffer
@@ -353,33 +403,36 @@ class PsiSensor():
 		ncpa_estimate = self._psiCalculation(self._speckle_field_t_psi,
 										      self._image_t_psi)
 
-
 		# Optional: project on modal basis
 		if self.cfg.params.psi_correction_mode is not 'all':
-			ncpa_estimate, _ = self._projectOnModalBasis(ncpa_estimate)
+			ncpa_estimate, ncpa_modes = self._projectOnModalBasis(ncpa_estimate)
+			return ncpa_estimate, ncpa_modes
+		else:
+			return ncpa_estimate
 
-		return ncpa_estimate
 
-
-	def findNcpaScaling(self, ncpa_estimate):
+	def findNcpaScaling(self, ncpa_estimate, rms_desired=None):
 		'''
-			Compute a NCPA scaling based on the input rms and
-			the expected rms (provided in the config file).
+		Compute a NCPA scaling based on the input rms and
+		the expected rms (provided in the config file).
 
-			This scaling is later use to scale the PSI estimate before NCPA
-			correction.
+		This scaling is later use to scale the PSI estimate before NCPA
+		correction.
 
-			Parameters
-			---------
-			ncpa_estimate
+		Parameters
+		---------
+		ncpa_estimate
 
-			Returns
-			-------
-			NCPA scaling
+		Returns
+		-------
+		NCPA scaling
 		'''
 		conv2nm = self.inst.wavelength / (2 * np.pi) * 1e9
 		rms_estimate = np.std(ncpa_estimate[self.ncpa_mask==1]) * conv2nm
-		rms_expected = self.cfg.params.ncpa_expected_rms
+		if rms_desired is None:
+			rms_expected = self.cfg.params.ncpa_expected_rms
+		else:
+			rms_expected = rms_desired
 
 		scaling = rms_expected / rms_estimate
 
@@ -388,12 +441,19 @@ class PsiSensor():
 
 	def next(self, display=True, check=False):
 		'''
-			Perform a complete iteration. This consists in:
-			1. grab the WFS telemetry and the sciences image
-			2. run the PSI algorithm
-			3. set the NCPA correction
-			4. (optional) check convergence
-			5. (optional) show progress
+		Perform a complete iteration. This consists in:
+		1. grab the WFS telemetry and the sciences image
+		2. run the PSI algorithm
+		3. set the NCPA correction
+		4. (optional) check convergence
+		5. (optional) show progress
+
+		PARAMETERS
+		-----------
+		display : bool
+			call 'show' method to provide a feedback to the user. default is True
+		check : bool
+			check PSI convergence (not implemented). default is False
 		'''
 		# Acquire telemetry buffers
 		nbOfSeconds = 1/self.cfg.params.psi_framerate
@@ -401,21 +461,38 @@ class PsiSensor():
 		science_images_buffer = self.inst.grabScienceImages(nbOfSeconds)
 
 		# Compute NCPA
-		ncpa_estimate = self._fullPsiAlgorithm(wfs_telemetry_buffer,
+		self._ncpa_estimate, self._ncpa_modes = self._fullPsiAlgorithm(wfs_telemetry_buffer,
 										  	   science_images_buffer)
 
 		if self.iter == 0:
 			''' at first iteration, compute a NCPA scaling'''
-			scaling = self.findNcpaScaling(ncpa_estimate)
+			scaling = self.findNcpaScaling(self._ncpa_estimate)
 			self.logger.info('New ncpa scaling is {0}'.format(scaling))
 			self.ncpa_scaling = scaling
 
 		# Arbitratry gain rule
 		# For the first 5 iteration, this gives: [1.0, 0.5, 0.25, 0.125, 0.1]
-		gain = np.max((0.5**self.iter, 0.1))
+		# gain = np.max((0.8**self.iter, 0.45))
+		# gain = np.max((0.5**self.iter, 0.1))
+		gain = 0.45 # 2022-06-24 --- dominated by water vapour
+
+
+		ncpa_command = - gain * self._ncpa_estimate * self.ncpa_mask * self.ncpa_scaling
+
+		self._ncpa_modes_integrated = self._ncpa_modes_integrated +\
+		 	gain * self._ncpa_modes * self.ncpa_scaling
+
+		if self._skip_limit is not None:
+			ncpa_estimate_rms = np.sqrt(np.sum(self._ncpa_modes**2)) * \
+			 	self.ncpa_scaling * self.inst.wavelength / 6.28 * 1e9
+			# scaling = self.findNcpaScaling(ncpa_command, rms_desired=50)
+			# print('Debug scaling : {0}'.format(scaling))
+			if ncpa_estimate_rms > skip_limit :
+				self.logger.warning('NCPA estimate too large ! Skipping !')
+				ncpa_command= 0 * ncpa_command
 
 		# Send correction
-		self.inst.setNcpaCorrection(- gain * ncpa_estimate * self.ncpa_mask * self.ncpa_scaling)
+		self.inst.setNcpaCorrection(ncpa_command)
 
 		self.iter += 1
 		# ------------#
@@ -429,12 +506,15 @@ class PsiSensor():
 		# Display
 		if display:
 			I_avg = science_images_buffer.mean(0)
-			self.show(I_avg, ncpa_estimate)
+			self.show(I_avg,
+					  self._ncpa_estimate * self.ncpa_scaling,
+					  gain * self._ncpa_modes * self.ncpa_scaling)
 
 	def loop(self):
 		'''
 			Run PSI for a number of iterations.
 			At each iterations:
+
 				1. run ``next()``
 				2. evaluate the sensor estimate performance
 				3. (optional) save fits file at every iteration
@@ -449,9 +529,18 @@ class PsiSensor():
 		if self.cfg.params.save_loop_statistics:
 			self._save_loop_stats()
 
-	def show(self, I_avg, ncpa_estimate):
+	def show(self, I_avg, ncpa_estimate, ncpa_modes):
 		'''
 			Display the PSF and the NCPA correction
+
+			Parameters
+			-----------
+			I_avg : numpy.array
+				science image
+			ncpa_estimate : hcipy.Field
+				last PSI NCPA estimate
+			ncpa_modes : numpy 1d-array
+				mode coefficients of the last PSI NCPA estimate
 
 			TODO improve and add displays
 		'''
@@ -459,7 +548,8 @@ class PsiSensor():
 		# self.fig.gca()
 		# plt.figure()
 		plt.clf()
-		plt.subplot(1, 3, 1)
+		gs = gridspec.GridSpec(2, 3)
+		ax = plt.subplot(gs[0, 0])
 		# hcipy.imshow_field(np.log10(I_sum / nbframes / I_sum.max()),
 		#                    vmin=-4, vmax=-1.5)
 		# hcipy.imshow_field(np.sqrt(I_sum / nbframes))
@@ -467,9 +557,11 @@ class PsiSensor():
 		im, norm = imshow_norm(I_avg, plt.gca(), origin='lower',
 			interval=MinMaxInterval(),
 			stretch=SqrtStretch())
+		plt.axis('off')
+
 
 		plt.title('Average SCI image')
-		plt.subplot(1, 3, 2)
+		ax = plt.subplot(gs[0, 1])
 		if np.size(self.inst.phase_ncpa_correction) == 1:
 		    hcipy.imshow_field(np.zeros(256**2), self.inst.pupilGrid,
 							   cmap='RdBu', mask=self.ncpa_mask)
@@ -478,32 +570,74 @@ class PsiSensor():
 		    hcipy.imshow_field(-self.inst.phase_ncpa_correction,
 								self.inst.pupilGrid,
 								cmap='RdBu', mask=self.ncpa_mask)
+		plt.axis('off')
 		plt.title('NCPA correction')
 
-		plt.subplot(1, 3, 3)
+		ax = plt.subplot(gs[0, 2])
 		hcipy.imshow_field(ncpa_estimate * self.ncpa_mask)
+		plt.axis('off')
 		plt.title('Last NCPA estimate')
+
+		ax = plt.subplot(gs[1, :])
+		if self.cfg.params.psi_correction_mode is not 'all':
+			mm=np.arange(self.cfg.params.psi_start_mode_idx,
+				self.cfg.params.psi_nb_modes + self.cfg.params.psi_start_mode_idx)
+			plt.plot(mm, ncpa_modes, label='last NCPA correction')
+			plt.plot(mm, self._ncpa_modes_integrated, c='k', ls='--', label='integrated')
+			# plt.title('Last NCPA modes')
+			plt.legend()
+			plt.ylim((-0.1, 0.1))
+			plt.xlabel('Mode index')
+			plt.ylabel('rms [rad]')
 
 		plt.draw()
 		plt.pause(0.01)
 
 	def checkPsiConvergence(self):
 		'''
+			TODO test and finalize implementation
+
 			TODO use self._speckle_field_t_psi and self._image_t_psi
 				to compute the psiEstimate and see how it converge
 		'''
-		pass
+		self.logger.warn('Experimantal implementation')
+		nbSteps= self._image_t_psi.shape[0]
+		ncpa_estimates = np.zeros((nbSteps, self._ncpa_estimate.shape[0]))
+		for i in range(1, nbSteps):
+			tmp_estimate = self.ncpa_mask * self._psiCalculation(self._speckle_field_t_psi[:i,:],
+											      self._image_t_psi[:i,:])
+
+			if self.cfg.params.psi_correction_mode is not 'all':
+				ncpa_estimate, ncpa_modes = self._projectOnModalBasis(tmp_estimate)
+				ncpa_estimates[i,:] = ncpa_estimate
+			else:
+				ncpa_estimates[i,:] = ncpa_estimate
+
+		return ncpa_estimates
 
 	def evaluateSensorEstimate(self, verbose=True):
 		'''
 			Compute the rms errors made on quasi-static NCPA and on water vapour seeing.
 
-			Only valid for a CompassSimInstrument and DemoCompassSimInstrument
+			/!\ Only valid for a `CompassSimInstrument` and `DemoCompassSimInstrument`
 
 			TODO make it generic to any instruments
 		'''
 		res_ncpa_qs = self.inst.phase_ncpa + self.inst.phase_ncpa_correction
 		res_ncpa_all = self.inst.phase_ncpa + self.inst.phase_wv + \
+			self.inst.phase_ncpa_correction
+		# 2022-06-2x ...
+		if self.iter == 0:
+			res_static_ncpa_qs = self.inst.phase_ncpa
+		else:
+			# tmp_avg = np.mean(self.inst.phase_ncpa_correction[self.inst.aperture>=0.5])
+			self._ncpa_correction_long_term += self.inst.phase_ncpa_correction #- tmp_avg)
+			# self._ncpa_correction_long_term /= self.iter
+
+			res_static_ncpa_qs = self.inst.phase_ncpa + (self._ncpa_correction_long_term / self.iter)
+
+		# 2022-07-01 -- metric with the average WV over one iteration
+		res_ncpa_all_bis = self.inst.phase_ncpa + self.inst.phase_wv_integrated + \
 			self.inst.phase_ncpa_correction
 
 		conv2nm = self.inst.wavelength / (2 * np.pi) * 1e9
@@ -512,46 +646,48 @@ class PsiSensor():
 		# 						self.inst.phase_wv)[self.inst.aperture==1]) * conv2nm
 		rms_res_qs = np.std(res_ncpa_qs[self.inst.aperture>=0.5]) * conv2nm
 		rms_res_all = np.std(res_ncpa_all[self.inst.aperture>=0.5]) * conv2nm
+		rms_res_all_bis = np.std(res_ncpa_all_bis[self.inst.aperture>=0.5]) * conv2nm
+
 
 		if self.cfg.params.psi_correction_mode is not 'all':
 			tmp, _ = self._projectOnModalBasis(res_ncpa_qs)
 			rms_res_qs_filt = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
 			tmp, _ = self._projectOnModalBasis(res_ncpa_all)
 			rms_res_all_filt = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
+			tmp, _ = self._projectOnModalBasis(res_ncpa_all_bis)
+			rms_res_all_bis_filt = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
 		else:
 			rms_res_qs_filt = rms_res_qs
 			rms_res_all_filt = rms_res_all
 
+		tmp, _ = self._projectOnModalBasis(self.inst.phase_wv)
+		rms_wv = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
+		tmp, _ = self._projectOnModalBasis(self.inst.phase_wv_integrated)
+		rms_wv_integrated = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
+
+		tmp, _ = self._projectOnModalBasis(self.inst.phase_ncpa_correction)
+		rms_corr = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
+
+		tmp, _ = self._projectOnModalBasis(res_static_ncpa_qs)
+		rms_res_static_NCPA_filt = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
+
 		if verbose:
-			self.logger.info('Res [QS, QS+WV] = [{0:.0f}, {1:.0f}]'.\
-				format(rms_res_qs, rms_res_all))
-			self.logger.info('Res. filt. [QS, QS+WV] = [{0:.0f}, {1:.0f}]'.\
-				format(rms_res_qs_filt, rms_res_all_filt))
+			self.logger.info('#{0} : Res [QS, QS+WV,  QS+WV b] = [{1:.0f}, {2:.0f}, {3:.0f}]'.\
+				format(self.iter, rms_res_qs, rms_res_all, rms_res_all_bis))
+			self.logger.info('#{0} : Res. filt. [QS, QS+WV, QS+WV b] = [{1:.0f}, {2:.0f}, {3:.0f}]'.\
+				format(self.iter, rms_res_qs_filt, rms_res_all_filt, rms_res_all_bis_filt))
+			self.logger.info('#{0} : input WV_f rms (last, integrated)  = ({1:.0f}, {2:.0f})'.format(self.iter, rms_wv, rms_wv_integrated))
+			self.logger.info('#{0} : PSI correction rms = {1:.0f}'.format(self.iter, rms_corr))
+			self.logger.info('#{0} : Long-term (static) residual rms = {1:.0f}'.format(self.iter, rms_res_static_NCPA_filt))
+
 
 		loop_stat = [self.iter]
 		loop_stat.append(rms_res_all_filt)
 		loop_stat.append(rms_res_qs_filt)
 		loop_stat.append(rms_res_all)
 		loop_stat.append(rms_res_qs)
+		# [01/07/2022] : added 01/07/2022
+		loop_stat.append(rms_wv_integrated)  # input WV average over 1/psi_framertae -- on the modes
+		loop_stat.append(rms_res_all_bis_filt)    # rms all considering the average WV and not the instantaneoius
+		loop_stat.append(rms_res_static_NCPA_filt)  # long-term average of the correction compared to the QS part
 		self._loop_stats.append(loop_stat)
-
-#
-# if __name__ == '__main__':
-# 	# config_file = '/Users/orban/Projects/METIS/4.PSI/psi_github/config/config_metis_compass.py'
-# 	config_file = '/Users/orban/Projects/METIS/4.PSI/psi_github/config/config_demo_metis_compass.py'
-#
-# 	psi_sensor = PsiSensor(config_file)
-#
-# 	psi_sensor.setup()
-# 	# Test: doing one iteration
-# 	psi_sensor.logger.info('Inputs:')
-# 	psi_sensor.evaluateSensorEstimate()
-# 	psi_sensor.ncpa_scaling = 1e-3
-# 	# psi_sensor.next()
-# 	# psi_sensor.evaluateSensorEstimate()
-# 	# psi_sensor.next()
-# 	# psi_sensor.evaluateSensorEstimate()
-# 	# for i in range(10):
-# 	# 	psi_sensor.next()
-# 	# 	psi_sensor.evaluateSensorEstimate()
-# 	psi_sensor.loop()
