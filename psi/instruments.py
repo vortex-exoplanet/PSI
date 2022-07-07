@@ -38,6 +38,7 @@ class GenericInstrument():
 
         self.phase_ncpa = hcipy.Field(0.0, self.pupilGrid)         # knowledge only in Simulation
         self.phase_wv = hcipy.Field(0.0, self.pupilGrid)           # knowledge only in Simulation
+        self.phase_wv_integrated = hcipy.Field(0.0, self.pupilGrid)           # knowledge only in Simulation
         self.phase_ncpa_correction = hcipy.Field(0.0, self.pupilGrid)  # NCPA correction applied
 
         pass
@@ -329,6 +330,7 @@ class CompassSimInstrument(GenericInstrument):
                                size_pupil_grid,
                                self.aperture, rotate=True)
         self.phase_wv *= self.wv_scaling
+        self.phase_wv_integrated = self.phase_wv
         # folder_wv = '/Users/orban/Projects/METIS/4.PSI/legacy_TestArea/WaterVapour/phases/'
         # file_wv = "cube_Cbasic_20210504_600s_100ms_0piston_meters_scao_only_285_WVLonly_qacits.fits"
         # wave_vapour_cube = fits.getdata(os.path.join(folder_wv, file_wv)) * \
@@ -366,8 +368,14 @@ class CompassSimInstrument(GenericInstrument):
         # re-initialize timer of single dit
         self._start_time_last_sci_dit = np.copy(self._start_time_sci_buffer)
         self._end_time_last_sci_dit = np.copy(self._start_time_sci_buffer)
+
+        if self.include_water_vapour :
+            self.phase_wv_integrated = 0
+            self.nb_wv_integrated = 0
         for i in range(self.nbOfSciImages):
             image_buffer[i] = self._grabOneScienceImage()
+        if self.include_water_vapour :
+            self.phase_wv_integrated /= self.nb_wv_integrated
 
         self._end_time_sci_buffer = np.copy(self._end_time_last_sci_dit)
         return image_buffer
@@ -429,6 +437,8 @@ class CompassSimInstrument(GenericInstrument):
             # Update water vapour phase
             if self.include_water_vapour :
                 self._update_water_vapour(self._start_time_last_sci_dit + timeIdxInMs[i])
+                self.phase_wv_integrated += self.phase_wv
+                self.nb_wv_integrated += 1
 
             # Update NCPA phase
             if self.ncpa_dynamic :

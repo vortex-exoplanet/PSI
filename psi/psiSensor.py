@@ -62,7 +62,7 @@ class PsiSensor():
 		# self.inst = getattr(instruments,
 		# 					self.cfg.params.instrument)(self.cfg.params)
 		self.inst = eval(self.cfg.params.instrument)(self.cfg.params)
-		importlib.import_module
+		# importlib.import_module
 		self.inst.build_optical_model()
 
 		# # Build focal plane filter for PSI
@@ -94,7 +94,11 @@ class PsiSensor():
 		self._ncpa_modes_integrated = 0 # np.zeros(self.cfg.params.psi_nb_modes)
 
 		# Diffraction component to be removed from speckle field in pupil
-		self._diffraction_component= self.inst.aperture
+		if self.cfg.params.inst_mode == 'CVC':
+			# TODO : also check that this should be the component in the RAVC mode
+			self._diffraction_component= self.inst.lyot_stop_mask
+		else:
+			self._diffraction_component= self.inst.aperture
 
 		# Holders for PSI-related cubes
 		N = int(np.round(1 / (self.cfg.params.dit * self.cfg.params.psi_framerate)))
@@ -148,12 +152,18 @@ class PsiSensor():
 	def _save_loop_stats(self):
 		'''
 			Saving loop statistics to file
+
+			Added the 01/07/2022:
+					loop_stat.append(rms_wv_integrated)  # input WV average over 1/psi_framertae -- on the modes
+					loop_stat.append(rms_res_all_bis_filt)    # rms all considering the average WV and not the instantaneoius
+					loop_stat.append(rms_res_static_NCPA_filt)  # long-term average of the correction compared to the QS part
+
 		'''
 		data = np.array(self._loop_stats)
 		np.savetxt(os.path.join(self._directory, 'loopStats.csv'),
 				  data,
-				  header ='units are nm \n it \t wfe_all_f \t wfe_qs_f \t wfe_all \t wfe_qs',
-				  fmt=['%i' , '%f', '%f', '%f', '%f'],
+				  header ='units are nm \n it \t wfe_all_f \t wfe_qs_f \t wfe_all \t wfe_qs \t input_wv_avg \t wfe_all_f_avg \t wfe_static',
+				  fmt=['%i' , '%f', '%f', '%f', '%f', '%f', '%f', '%f'],
 				  delimiter= '\t')
 
 	def _store_phase_screens_to_file(self, i):
@@ -276,6 +286,9 @@ class PsiSensor():
 		# Project ncpa estimate on finite set of modes
 		if self.cfg.params.inst_mode == 'CVC' or self.cfg.params.inst_mode == 'RAVC':
 			proj_mask = self.inst.lyot_stop_mask
+			# adding binary transformation for the mask. This gives better results in N-band CVC at least
+			proj_mask[proj_mask<0.5] = 0
+			proj_mask[proj_mask>=0.5]=1
 		else:
 			proj_mask = self.inst.aperture
 		ncpa_modes      = self.C2M.dot(ncpa_estimate * proj_mask)
@@ -299,6 +312,7 @@ class PsiSensor():
 		wfs_wavefront_hcipy = hcipy.Field(wfs_telemetry_buffer_1d, self.inst.pupilGrid)
 		Efield = hcipy.Wavefront(self.inst.aperture * np.exp(1j * wfs_wavefront_hcipy) \
 			- self._diffraction_component)
+		# Efield = hcipy.Wavefront(self.inst.aperture * np.exp(1j * wfs_wavefront_hcipy) )
 		Efield.total_power = self.nbOfPhotons  * nf
 
 		# #----------
@@ -446,8 +460,9 @@ class PsiSensor():
 
 		# Arbitratry gain rule
 		# For the first 5 iteration, this gives: [1.0, 0.5, 0.25, 0.125, 0.1]
-		gain = np.max((0.8**self.iter, 0.45))
-		# gain = 0.45 # 2022-06-24 --- dominated by water vapour
+		# gain = np.max((0.8**self.iter, 0.45))
+		# gain = np.max((0.5**self.iter, 0.1))
+		gain = 0.45 # 2022-06-24 --- dominated by water vapour
 
 
 		ncpa_command = - gain * self._ncpa_estimate * self.ncpa_mask * self.ncpa_scaling
@@ -586,6 +601,7 @@ class PsiSensor():
 		res_ncpa_qs = self.inst.phase_ncpa + self.inst.phase_ncpa_correction
 		res_ncpa_all = self.inst.phase_ncpa + self.inst.phase_wv + \
 			self.inst.phase_ncpa_correction
+		# 2022-06-2x ...
 		if self.iter == 0:
 			res_static_ncpa_qs = self.inst.phase_ncpa
 		else:
@@ -595,24 +611,34 @@ class PsiSensor():
 
 			res_static_ncpa_qs = self.inst.phase_ncpa + (self._ncpa_correction_long_term / self.iter)
 
+		# 2022-07-01 -- metric with the average WV over one iteration
+		res_ncpa_all_bis = self.inst.phase_ncpa + self.inst.phase_wv_integrated + \
+			self.inst.phase_ncpa_correction
+
 		conv2nm = self.inst.wavelength / (2 * np.pi) * 1e9
 		# rms_input_qs = np.std(self.inst.phase_ncpa[self.inst.aperture==1]) * conv2nm
 		# rms_input_all = np.std((self.inst.phase_ncpa + \
 		# 						self.inst.phase_wv)[self.inst.aperture==1]) * conv2nm
 		rms_res_qs = np.std(res_ncpa_qs[self.inst.aperture>=0.5]) * conv2nm
 		rms_res_all = np.std(res_ncpa_all[self.inst.aperture>=0.5]) * conv2nm
+		rms_res_all_bis = np.std(res_ncpa_all_bis[self.inst.aperture>=0.5]) * conv2nm
+
 
 		if self.cfg.params.psi_correction_mode is not 'all':
 			tmp, _ = self._projectOnModalBasis(res_ncpa_qs)
 			rms_res_qs_filt = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
 			tmp, _ = self._projectOnModalBasis(res_ncpa_all)
 			rms_res_all_filt = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
+			tmp, _ = self._projectOnModalBasis(res_ncpa_all_bis)
+			rms_res_all_bis_filt = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
 		else:
 			rms_res_qs_filt = rms_res_qs
 			rms_res_all_filt = rms_res_all
 
 		tmp, _ = self._projectOnModalBasis(self.inst.phase_wv)
 		rms_wv = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
+		tmp, _ = self._projectOnModalBasis(self.inst.phase_wv_integrated)
+		rms_wv_integrated = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
 
 		tmp, _ = self._projectOnModalBasis(self.inst.phase_ncpa_correction)
 		rms_corr = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
@@ -621,11 +647,11 @@ class PsiSensor():
 		rms_res_static_NCPA_filt = np.std(tmp[self.inst.aperture>=0.5]) * conv2nm
 
 		if verbose:
-			self.logger.info('#{0} : Res [QS, QS+WV] = [{1:.0f}, {2:.0f}]'.\
-				format(self.iter, rms_res_qs, rms_res_all))
-			self.logger.info('#{0} : Res. filt. [QS, QS+WV] = [{1:.0f}, {2:.0f}]'.\
-				format(self.iter, rms_res_qs_filt, rms_res_all_filt))
-			self.logger.info('#{0} : input WV_f rms  = {1:.0f}'.format(self.iter, rms_wv))
+			self.logger.info('#{0} : Res [QS, QS+WV,  QS+WV b] = [{1:.0f}, {2:.0f}, {3:.0f}]'.\
+				format(self.iter, rms_res_qs, rms_res_all, rms_res_all_bis))
+			self.logger.info('#{0} : Res. filt. [QS, QS+WV, QS+WV b] = [{1:.0f}, {2:.0f}, {3:.0f}]'.\
+				format(self.iter, rms_res_qs_filt, rms_res_all_filt, rms_res_all_bis_filt))
+			self.logger.info('#{0} : input WV_f rms (last, integrated)  = ({1:.0f}, {2:.0f})'.format(self.iter, rms_wv, rms_wv_integrated))
 			self.logger.info('#{0} : PSI correction rms = {1:.0f}'.format(self.iter, rms_corr))
 			self.logger.info('#{0} : Long-term (static) residual rms = {1:.0f}'.format(self.iter, rms_res_static_NCPA_filt))
 
@@ -635,6 +661,10 @@ class PsiSensor():
 		loop_stat.append(rms_res_qs_filt)
 		loop_stat.append(rms_res_all)
 		loop_stat.append(rms_res_qs)
+		# [01/07/2022] : added 01/07/2022
+		loop_stat.append(rms_wv_integrated)  # input WV average over 1/psi_framertae -- on the modes
+		loop_stat.append(rms_res_all_bis_filt)    # rms all considering the average WV and not the instantaneoius
+		loop_stat.append(rms_res_static_NCPA_filt)  # long-term average of the correction compared to the QS part
 		self._loop_stats.append(loop_stat)
 
 #
