@@ -171,6 +171,11 @@ class PsiSensor():
 			Storing phase screens to fits file.
 			Units of phase is nm
 
+			Parameters
+			----------
+			 i : int
+			 	index appended to the fits filename
+
 			TODO populate the header with useful information
 		'''
 		conv2nm = self.inst.wavelength / (2*np.pi) * 1e9
@@ -217,6 +222,11 @@ class PsiSensor():
 			speckle field in the focal plane calculated based on the WFS telemetry
 		images_fp : array
 			science images
+
+		Returns
+		--------
+		ncpa_estimate: array
+			NCPA estimation provided by PSI (no modal projection)
 
 		'''
 		# PSI calculation
@@ -277,8 +287,8 @@ class PsiSensor():
 			---------
 			ncpa_estimate	: NCPA phase map
 
-			Return
-			------
+			Returns
+			--------
 			ncpa_estimate	: phase map filtered to a finite set of modes
 			ncpa_modes		: modal coefficients vector
 
@@ -347,22 +357,23 @@ class PsiSensor():
 	@timeit
 	def _fullPsiAlgorithm(self, wfs_telemetry_buffer, science_images_buffer):
 		'''
-			Complete PSI algorithm containing the following steps:
-			1. synchronization of the WFS phase telemetry and the science images buffers
-			2. Computation of the speckle fields based on the WFS telemetry.
-				This corresponds to the "reference beam" :math:`\psi`
-			3. PSI algebra using the :math:`\psi` buffer, and the :math:`I` (images) buffer
-			4. Optional projection on a finite set of modes
+		Complete PSI algorithm containing the following steps:
 
-			Parameters
-			----------
-			wfs_telemetry_buffer
+		1. synchronization of the WFS phase telemetry and the science images buffers
+		2. Computation of the speckle fields based on the WFS telemetry.
+			This corresponds to the "reference beam" :math:`\psi`
+		3. PSI algebra using the :math:`\psi` buffer, and the :math:`I` (images) buffer
+		4. Optional projection on a finite set of modes
 
-			science_images_buffer
+		Parameters
+		----------
+		wfs_telemetry_buffer
 
-			Returns
-			-------
-			ncpa_estimate
+		science_images_buffer
+
+		Returns
+		-------
+		ncpa_estimate
 		'''
 		# Synchronize the WFS telemetry buffer and science image buffer
 		# Telemetry_indexing is used for sync and slicing of the wfs telemetry buffer
@@ -402,19 +413,19 @@ class PsiSensor():
 
 	def findNcpaScaling(self, ncpa_estimate, rms_desired=None):
 		'''
-			Compute a NCPA scaling based on the input rms and
-			the expected rms (provided in the config file).
+		Compute a NCPA scaling based on the input rms and
+		the expected rms (provided in the config file).
 
-			This scaling is later use to scale the PSI estimate before NCPA
-			correction.
+		This scaling is later use to scale the PSI estimate before NCPA
+		correction.
 
-			Parameters
-			---------
-			ncpa_estimate
+		Parameters
+		---------
+		ncpa_estimate
 
-			Returns
-			-------
-			NCPA scaling
+		Returns
+		-------
+		NCPA scaling
 		'''
 		conv2nm = self.inst.wavelength / (2 * np.pi) * 1e9
 		rms_estimate = np.std(ncpa_estimate[self.ncpa_mask==1]) * conv2nm
@@ -430,18 +441,19 @@ class PsiSensor():
 
 	def next(self, display=True, check=False):
 		'''
-			Perform a complete iteration. This consists in:
-			1. grab the WFS telemetry and the sciences image
-			2. run the PSI algorithm
-			3. set the NCPA correction
-			4. (optional) check convergence
-			5. (optional) show progress
+		Perform a complete iteration. This consists in:
+		1. grab the WFS telemetry and the sciences image
+		2. run the PSI algorithm
+		3. set the NCPA correction
+		4. (optional) check convergence
+		5. (optional) show progress
 
-			PARAMETERS
-			-----------
-			skip_limit	: float
-				nm rms WFE above which the NCPA estimate will be skipped.
-				For no skip_limit, use 'None'
+		PARAMETERS
+		-----------
+		display : bool
+			call 'show' method to provide a feedback to the user. default is True
+		check : bool
+			check PSI convergence (not implemented). default is False
 		'''
 		# Acquire telemetry buffers
 		nbOfSeconds = 1/self.cfg.params.psi_framerate
@@ -502,6 +514,7 @@ class PsiSensor():
 		'''
 			Run PSI for a number of iterations.
 			At each iterations:
+
 				1. run ``next()``
 				2. evaluate the sensor estimate performance
 				3. (optional) save fits file at every iteration
@@ -519,6 +532,15 @@ class PsiSensor():
 	def show(self, I_avg, ncpa_estimate, ncpa_modes):
 		'''
 			Display the PSF and the NCPA correction
+
+			Parameters
+			-----------
+			I_avg : numpy.array
+				science image
+			ncpa_estimate : hcipy.Field
+				last PSI NCPA estimate
+			ncpa_modes : numpy 1d-array
+				mode coefficients of the last PSI NCPA estimate
 
 			TODO improve and add displays
 		'''
@@ -573,9 +595,12 @@ class PsiSensor():
 
 	def checkPsiConvergence(self):
 		'''
+			TODO test and finalize implementation
+
 			TODO use self._speckle_field_t_psi and self._image_t_psi
 				to compute the psiEstimate and see how it converge
 		'''
+		self.logger.warn('Experimantal implementation')
 		nbSteps= self._image_t_psi.shape[0]
 		ncpa_estimates = np.zeros((nbSteps, self._ncpa_estimate.shape[0]))
 		for i in range(1, nbSteps):
@@ -594,7 +619,7 @@ class PsiSensor():
 		'''
 			Compute the rms errors made on quasi-static NCPA and on water vapour seeing.
 
-			Only valid for a CompassSimInstrument and DemoCompassSimInstrument
+			/!\ Only valid for a `CompassSimInstrument` and `DemoCompassSimInstrument`
 
 			TODO make it generic to any instruments
 		'''
@@ -666,24 +691,3 @@ class PsiSensor():
 		loop_stat.append(rms_res_all_bis_filt)    # rms all considering the average WV and not the instantaneoius
 		loop_stat.append(rms_res_static_NCPA_filt)  # long-term average of the correction compared to the QS part
 		self._loop_stats.append(loop_stat)
-
-#
-# if __name__ == '__main__':
-# 	# config_file = '/Users/orban/Projects/METIS/4.PSI/psi_github/config/config_metis_compass.py'
-# 	config_file = '/Users/orban/Projects/METIS/4.PSI/psi_github/config/config_demo_metis_compass.py'
-#
-# 	psi_sensor = PsiSensor(config_file)
-#
-# 	psi_sensor.setup()
-# 	# Test: doing one iteration
-# 	psi_sensor.logger.info('Inputs:')
-# 	psi_sensor.evaluateSensorEstimate()
-# 	psi_sensor.ncpa_scaling = 1e-3
-# 	# psi_sensor.next()
-# 	# psi_sensor.evaluateSensorEstimate()
-# 	# psi_sensor.next()
-# 	# psi_sensor.evaluateSensorEstimate()
-# 	# for i in range(10):
-# 	# 	psi_sensor.next()
-# 	# 	psi_sensor.evaluateSensorEstimate()
-# 	psi_sensor.loop()

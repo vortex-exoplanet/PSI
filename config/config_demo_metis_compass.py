@@ -28,7 +28,7 @@ conf = dict(
     # =======
     #    0. mode = 'ELT'  for no coronagraph (only telescope)
     #    1. mode = 'CVC'  for Classical Vortex Coronagraph
-    #    (2. mode = 'RAVC' for Ring Apodized Vortex Coronagraph)
+    #    2. mode = 'RAVC' for Ring Apodized Vortex Coronagraph
     #    (3. mode = 'APP'  for Apodizing Phase Plate)
     inst_mode = 'ELT',                  # HCI instrument mode
     vc_charge = 2,                      # (CVC and RAVC only) vortex topological charge
@@ -44,7 +44,6 @@ conf = dict(
     # # CVC L-band: ls_CVC_L_285_dRext=0.0209_dRint=0.09_dRspi=0.0245.fits
     # # CVC N2-band: ls_CVC_N2_119_dRext=0.0268_dRint=0.09_dRspi=0.0357.fits
     # # RAVC L-band: ls_RAVC_L_285_dRext=0.0477_dRint=0.04_dRspi=0.0249.fits
-
 
     # RAVC LS L-band:
     f_lyot_stop = _tmp_dir + 'pupil/ls_RAVC_L_285_dRext=0.0477_dRint=0.04_dRspi=0.0249.fits',

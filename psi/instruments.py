@@ -76,14 +76,14 @@ class GenericInstrument():
         self._aperture = aper
 
     @abc.abstractmethod
-    def grabWfsTelemetry(self):
+    def grabWfsTelemetry(self, nbOfSeconds):
         '''
         Grab wavefront sensor telemetry and returns wavefront buffer
         '''
         pass
 
     @abc.abstractmethod
-    def grabScienceImages(self):
+    def grabScienceImages(self, nbOfSeconds):
         '''
         Grab science images and returns science images buffer
         '''
@@ -355,6 +355,17 @@ class CompassSimInstrument(GenericInstrument):
     def grabScienceImages(self, nbOfPastSeconds):
         '''
             Grab a buffer of science images
+
+            Parameters
+            ------------
+            nbOfPastSeconds : float
+                number of seconds of science images (can be equivalent to one or several images)
+
+            Returns
+            --------
+            image_buffer  : numpy ndarray
+                science image buffer of dimension (nbOfSciImages, nx, ny)
+
         '''
         self.nbOfSciImages = int(nbOfPastSeconds / self.sci_exptime)
         assert self.nbOfSciImages <= nbOfPastSeconds / self.sci_exptime
@@ -485,8 +496,17 @@ class CompassSimInstrument(GenericInstrument):
 
     def grabWfsTelemetry(self, nbOfPastSeconds):
         '''
+        Grab a buffer of WFS telemetry
+
+        Parameters
+        ------------
+        nbOfPastSeconds : float
+            number of seconds of science images (can be equivalent to one or several images)
+
         Returns
-                phase cube in units of radian
+        --------
+        phase_cube  : numpy ndarray
+            phase cube in units of radian
         '''
         # self._compass_start_time=2011 # COMPASS 0 indexing in msec
 
@@ -524,10 +544,28 @@ class CompassSimInstrument(GenericInstrument):
         return phase_cube
 
     def setNcpaCorrection(self, phase):
+        '''
+            Apply NCPA correction
+
+            Parameters
+            ----------
+            phase : numpy ndarray
+                phase correction to be applied
+        '''
         self.phase_ncpa_correction = self.phase_ncpa_correction + phase
 
     def synchronizeBuffers(self, wfs_telemetry_buffer, sci_image_buffer):
         '''
+            Synchronize science and wfs telemetry buffers
+
+            Parameters
+            ----------
+            wfs_telemetry_buffer : numpy ndarray
+                WFS telemetry buffer as returned by 'grabWfsTelemetry'
+            sci_image_buffer : numpy ndarray
+                Science image buffer as returned by 'grabScienceImages'
+
+
             Note:
                 wfs_telemetry_buffer & sci_image_buffer are actually not used here.
                 To be realistic, one could correlate the tip-tilt in both to sync them.
@@ -553,6 +591,11 @@ class CompassSimInstrument(GenericInstrument):
         return telemetry_indexing
 
     def getNumberOfPhotons(self):
+        '''
+            Returns
+            --------
+            Number of photons for a single science exposure
+        '''
         return self.num_photons
 
 class DemoCompassSimInstrument(CompassSimInstrument):
@@ -651,8 +694,17 @@ class DemoCompassSimInstrument(CompassSimInstrument):
 
     def grabWfsTelemetry(self, nbOfPastSeconds):
         '''
+        Grab a buffer of WFS telemetry
+
+        Parameters
+        ------------
+        nbOfPastSeconds : float
+            number of seconds of science images (can be equivalent to one or several images)
+
         Returns
-                phase cube in units of radian
+        --------
+        phase_cube  : numpy ndarray
+            phase cube in units of radian
         '''
         # self._compass_start_time=2011 # COMPASS 0 indexing in msec
 
@@ -690,10 +742,18 @@ class DemoCompassSimInstrument(CompassSimInstrument):
         return phase_cube
 
 class HcipySimInstrument(GenericInstrument):
+    '''
+    Not implemented
+    '''
+    # raise NotImplementedError()
     pass
 
 
 class ErisInterfaceOffline(GenericInstrument):
+    '''
+    Not implemented
+    '''
+    # raise NotImplementedError()
     pass
 
 
