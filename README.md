@@ -22,6 +22,7 @@ The ffmpeg tools are required for generating movies.
 
 [HCIPy](https://github.com/ehpor/hcipy) is a Python software package written and developed by Emiel Por for performing end-to-end simulations of high contrast imaging instruments for astronomy.
 
-**HCIPy version currently required: '0.4.1.dev137+gc1ea9e5' (master version of 5/12/2021).**
+We recommand to use the latest release: 0.5.0 on 18 August 2022
+(minimum required: '0.4.1.dev137+gc1ea9e5' - master version of 5 December 2021).
 
 **Do not pip install but do a git clone instead**
