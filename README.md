@@ -25,4 +25,3 @@ The ffmpeg tools are required for generating movies.
 We recommand to use the latest release: 0.5.0 on 18 August 2022
 (minimum required: '0.4.1.dev137+gc1ea9e5' - master version of 5 December 2021).
 
-**Do not pip install but do a git clone instead**
