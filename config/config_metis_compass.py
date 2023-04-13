@@ -33,7 +33,7 @@ conf = dict(
     #    1. mode = 'CVC'  for Classical Vortex Coronagraph
     #    (2. mode = 'RAVC' for Ring Apodized Vortex Coronagraph)
     #    (3. mode = 'APP'  for Apodizing Phase Plate)
-    inst_mode = 'CVC',                  # HCI instrument mode
+    inst_mode = 'IMG',                  # HCI instrument mode
     vc_charge = 2,                      # (CVC and RAVC only) vortex topological charge
     vc_vector = False,                  # (CVC and RAVC only) simulate a vector vortex instead of a scalar one
 
@@ -66,15 +66,21 @@ conf = dict(
     # ======
     noise = 2  ,                        # 0: no noise, 1: photon noise only, 2: photon noise + background noise
     # add_bckg = False,                   # true means background flux and photon noise are added
-    mag = -1.5,                            # star magnitude at selected band
+    mag = 1.5,                            # star magnitude at selected band
     # mag_ref = 0,                        # reference magnitude for star and background fluxes
 
     # --- the 3 following parameters should be replaced by the 'band_specs provided below'
+    # L-band
+    # wavelength = 3.81e-6, # 11.33e-6, #3.81e-6   ,             # [m] wavelength
+    # flux_zpt = 8.999e+10,  #3.695e10, #8.999e+10,               # [e-/s] zeropoint HCI-L long, mag 0 (Jan 21, 2020)
+    # flux_bckg = 8.878e+4, #1.122e8, #8.878e+4,              # [e-/s/pix]
+
+    # N-band
     wavelength = 11.33e-6, #3.81e-6   ,             # [m] wavelength
     flux_zpt = 3.695e10, #8.999e+10,               # [e-/s] zeropoint HCI-L long, mag 0 (Jan 21, 2020)
     flux_bckg = 1.122e8, #8.878e+4,              # [e-/s/pix]
 
-    dit = 0.04,                          # [s] science detector integration time
+    dit = 0.01,                          # [s] science detector integration time
 
     # TODO METIS photometry should be defined in a separate file and the user should not have
     # to provide 'wavelength', 'flux_zpt', 'flux_bckg', but just 'METIS-L' or 'METIS-N' for example.
@@ -139,7 +145,8 @@ conf = dict(
     psi_filt_radius = 10,          # [lbda/D]
 
     # PSI scaling --- because of unknown scaling factor of NCPA
-    ncpa_expected_rms = 50, #250,        # expected NCPA in [nm]
+    # set to None to let PSI find the scaling
+    ncpa_expected_rms = None, # 100, # 50, #250,        # expected NCPA in [nm] -- 
 
     # ============
     #   NCPA
@@ -170,6 +177,7 @@ conf = dict(
     wv_folder = '/Users/orban/Projects/METIS/4.PSI/legacy_TestArea/WaterVapour/phases/',
      #'cube_Cbasic_20210504_600s_100ms_0piston_meters_scao_only_285_WVLonly_qacits.fits'
     wv_cubename = 'cube_Cbasic_20210504_600s_100ms_0piston_meters_scao_only_285_WVNonly_qacits.fits', #'cube_Cbasic_20210504_600s_100ms_0piston_meters_scao_only_285_WVLonly_qacits.fits',  # NB assume units are in meters
+    # wv_cubename = 'cube_Cbasic_20210504_600s_100ms_0piston_meters_scao_only_285_WVLonly_qacits.fits', #,  # NB assume units are in meters
     wv_sampling = 100,      #[ms] sampling of the cube
     wv_scaling = 1, #1/100,          # scale factor, if want to change the level
     # =============

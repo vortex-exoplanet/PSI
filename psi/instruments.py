@@ -38,7 +38,7 @@ class GenericInstrument():
 
         self.phase_ncpa = hcipy.Field(0.0, self.pupilGrid)         # knowledge only in Simulation
         self.phase_wv = hcipy.Field(0.0, self.pupilGrid)           # knowledge only in Simulation
-        self.phase_wv_integrated = hcipy.Field(0.0, self.pupilGrid)           # knowledge only in Simulation
+        self.phase_wv_integrated = hcipy.Field(0.0, self.pupilGrid)    # knowledge only in Simulation
         self.phase_ncpa_correction = hcipy.Field(0.0, self.pupilGrid)  # NCPA correction applied
 
         pass
@@ -256,7 +256,7 @@ class CompassSimInstrument(GenericInstrument):
             self.optical_model = hcipy.OpticalSystem([self._vvc_element,
                                                       self._lyot_stop_element,
                                                       self._prop])
-        elif self._inst_mode == 'ELT':
+        elif self._inst_mode == 'ELT' or self._inst_mode == 'IMG':
             self.logger.info('Building a simple imager in HCIPy')
             self.optical_model = hcipy.OpticalSystem([self._prop])
 

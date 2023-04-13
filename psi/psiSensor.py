@@ -92,6 +92,8 @@ class PsiSensor():
 			self.C2M = hcipy.inverse_tikhonov(self.M2C.transformation_matrix, 1e-3)
 
 		self._ncpa_modes_integrated = 0 # np.zeros(self.cfg.params.psi_nb_modes)
+		self._amplitude_integrated = 0
+		self._scale_factor_past = 0
 
 		# Diffraction component to be removed from speckle field in pupil
 		if self.cfg.params.inst_mode == 'CVC':
@@ -200,8 +202,15 @@ class PsiSensor():
 		hdr.set('EXTNAME', 'NCPA_COR')
 		fits.append(full_name, ncpa_correction, hdr)
 
+	# def _scale_factor_integrator(self):
+	# 	toto = self._scale_factor.copy()
+	# 	toto[np.isnan(toto)] = np.nanmin(toto)
 
-	def _psiCalculation(self, speckle_fields_fp, images_fp, scale_factor=False):
+	# 	leak=0.99
+	# 	self._scale_factor = (leak * self._scale_factor_past + toto) / 2
+	# 	self._scale_factor_past = self._scale_factor.copy()
+
+	def _psiCalculation(self, speckle_fields_fp, images_fp, scale_factor=True):
 		'''
 		1. Calculate the 'subject beam' :math:`\Psi`, which is the electric field in the \
 			focal plane corresponding to the NCPA we want to estimate. See eq. 21 in Codona et all. 2017:
@@ -230,37 +239,43 @@ class PsiSensor():
 
 		'''
 		# PSI calculation
-		phi_I = np.sum(speckle_fields_fp * images_fp, axis=0)
-		phi_2 = np.sum(np.abs(speckle_fields_fp)**2, axis=0)
+		phi_I = np.mean(speckle_fields_fp * images_fp, axis=0)
+		phi_2 = np.mean(np.abs(speckle_fields_fp)**2, axis=0)
+		phi_mean = np.mean(speckle_fields_fp, axis=0)
 		phi_sum = np.sum(speckle_fields_fp, axis=0)
 		I_sum = np.sum(images_fp, axis=0)
 		nbframes = images_fp.shape[0]
 
+		# correction for 'small' sample statistics
+		phi_I_c = (phi_I - phi_sum * I_sum / nbframes**2)
+		phi_2_c = (phi_2 - np.abs(phi_mean)**2)
+		
 		# ff = np.sum(I_sum) / np.sum(phi_2)
 		# phi_2 *= ff
 		# phi_I *=np.sqrt(ff)
 		# phi_sum *= np.sqrt(ff)
 		#---------
-		if scale_factor:
+		if scale_factor and (self.cfg.params.ncpa_expected_rms is None):
 			# Trying to compute the scale factor
 			var_I = np.var(images_fp, axis=0)
-			var_s = np.var(speckle_fields_fp**2, axis=0)
-			# s_mean = np.mean(np.abs(speckle_field_t_psi)**2, axis=0)
+			var_s = np.var(np.abs(speckle_fields_fp)**2, axis=0)
 
-			phi_I_c = (phi_I - phi_sum * I_sum / nbframes)
-			phi_2_c = (phi_2 - np.abs(phi_sum / nbframes)**2)
-
-			I_mean = np.mean(images_fp, axis=0)
-			g = (var_I / var_s - 2 * np.abs(phi_I)**2 / (phi_2 * var_s))**(1/4)
-
-
+			self._scale_factor = (var_I / var_s - 2 * np.abs(phi_I_c)**2 / (phi_2_c * var_s))**(1/4)
+			if np.any(np.isnan(self._scale_factor)):
+				self.logger.warn('NaN in scale factor set to median value; fraction of NaN is {0:.0f}%'.\
+		    		format(np.sum(np.isnan(self._scale_factor))/np.size(self._scale_factor) * 100))
+			self._scale_factor[np.isnan(self._scale_factor)] = np.nanmedian(self._scale_factor)
+			# self._scale_factor_integrator()
 		else:
-			g = 1
+			self._scale_factor = np.ones(phi_I_c.shape)
 		#---------
 
-		psi_estimate = (phi_I - phi_sum * I_sum / nbframes) / (g * (phi_2 - np.abs(phi_sum / nbframes)**2))
+		psi_estimate = phi_I_c / (self._scale_factor * phi_2_c)
 		# psi_estimate = (phi_I) / (g * (phi_2 ))
-
+		if np.any(np.isnan(psi_estimate)):
+			self.logger.warn('NaN in PSI estimate set to 0; fraction of NaN is {0:.0f}%'.\
+		    	format(np.sum(np.isnan(psi_estimate))/np.size(psi_estimate) * 100))
+			psi_estimate[np.isnan(psi_estimate)] = 0
 
 		self._psi_estimate = hcipy.Field(psi_estimate, self.inst.focalGrid)
 		wf = hcipy.Wavefront(self._psi_estimate * self.filter_fp)
@@ -273,10 +288,25 @@ class PsiSensor():
 
 		self._estimated_wavefront = pup
 
-		# Small phase hypothesis
-		ncpa_estimate = pup.electric_field.imag
+		# Small phase hypothesis: Efield = A (1 + i \phi)
+		# -- for robustness we divide by the median value within the aperture 
+		# 	instead of the 2d amplitude array
+		# % 2 : not clear why, difference between wavefront and surface ?
+		# TODO :  VC modes are further divided by an empirical factor of 10. 
+		# Not clear why: coronagraphic effect reducing speckle pinning... and modifying the scaling map ?
+		# The value may depend on noise (magnitude) and fp filter radius
+		if self.cfg.params.inst_mode == 'ELT' or self.cfg.params.inst_mode=='IMG':
+			mask = self.inst.aperture
+		else:
+			mask = self.inst.lyot_stop_mask
+		med_value = np.median(np.abs(pup.electric_field.real[mask==1]))
+		self._phase_estimate = pup.electric_field.imag / med_value / 2
+		if self.cfg.params.inst_mode == 'CVC' or self.cfg.params.inst_mode == 'RAVC':
+			self._phase_estimate /= 10
 
-		return ncpa_estimate
+		self._amplitude_estimate = self._estimated_wavefront.electric_field.real
+
+		return self._phase_estimate
 
 	def _projectOnModalBasis(self, ncpa_estimate):
 		'''
@@ -464,30 +494,33 @@ class PsiSensor():
 		self._ncpa_estimate, self._ncpa_modes = self._fullPsiAlgorithm(wfs_telemetry_buffer,
 										  	   science_images_buffer)
 
-		if self.iter == 0:
+		if self.iter == 0 and (self.cfg.params.ncpa_expected_rms is not None):
 			''' at first iteration, compute a NCPA scaling'''
 			scaling = self.findNcpaScaling(self._ncpa_estimate)
 			self.logger.info('New ncpa scaling is {0}'.format(scaling))
 			self.ncpa_scaling = scaling
+		else:
+			self.ncpa_scaling = 1 
 
 		# Arbitratry gain rule
 		# For the first 5 iteration, this gives: [1.0, 0.5, 0.25, 0.125, 0.1]
 		# gain = np.max((0.8**self.iter, 0.45))
 		# gain = np.max((0.5**self.iter, 0.1))
 		gain = 0.45 # 2022-06-24 --- dominated by water vapour
-
+		# gain = 1	# for static aberrations
 
 		ncpa_command = - gain * self._ncpa_estimate * self.ncpa_mask * self.ncpa_scaling
 
 		self._ncpa_modes_integrated = self._ncpa_modes_integrated +\
 		 	gain * self._ncpa_modes * self.ncpa_scaling
+		self._amplitude_integrated += self._amplitude_estimate
 
 		if self._skip_limit is not None:
 			ncpa_estimate_rms = np.sqrt(np.sum(self._ncpa_modes**2)) * \
 			 	self.ncpa_scaling * self.inst.wavelength / 6.28 * 1e9
 			# scaling = self.findNcpaScaling(ncpa_command, rms_desired=50)
 			# print('Debug scaling : {0}'.format(scaling))
-			if ncpa_estimate_rms > skip_limit :
+			if ncpa_estimate_rms > self._skip_limit :
 				self.logger.warning('NCPA estimate too large ! Skipping !')
 				ncpa_command= 0 * ncpa_command
 
@@ -502,6 +535,7 @@ class PsiSensor():
 
 		# Metrics... - might only be valid in simualtion
 		# self.evaluateSensorEstimate()
+
 
 		# Display
 		if display:
@@ -548,7 +582,8 @@ class PsiSensor():
 		# self.fig.gca()
 		# plt.figure()
 		plt.clf()
-		gs = gridspec.GridSpec(2, 3)
+		gs = gridspec.GridSpec(3, 3)
+
 		ax = plt.subplot(gs[0, 0])
 		# hcipy.imshow_field(np.log10(I_sum / nbframes / I_sum.max()),
 		#                    vmin=-4, vmax=-1.5)
@@ -560,25 +595,43 @@ class PsiSensor():
 		plt.axis('off')
 
 
-		plt.title('Average SCI image')
+		plt.title('L.E. SCI img')
 		ax = plt.subplot(gs[0, 1])
 		if np.size(self.inst.phase_ncpa_correction) == 1:
 		    hcipy.imshow_field(np.zeros(256**2), self.inst.pupilGrid,
 							   cmap='RdBu', mask=self.ncpa_mask)
+		    
 		else:
 		    # , vmin=-ncpa_max, vmax=ncpa_max)
 		    hcipy.imshow_field(-self.inst.phase_ncpa_correction,
 								self.inst.pupilGrid,
 								cmap='RdBu', mask=self.ncpa_mask)
+		    
 		plt.axis('off')
 		plt.title('NCPA correction')
 
 		ax = plt.subplot(gs[0, 2])
 		hcipy.imshow_field(ncpa_estimate * self.ncpa_mask)
 		plt.axis('off')
-		plt.title('Last NCPA estimate')
+		plt.title(r'Last $\Delta$NCPA')
 
-		ax = plt.subplot(gs[1, :])
+
+		ax = plt.subplot(gs[1, 0])
+		hcipy.imshow_field(self._scale_factor)
+		plt.axis('off')
+		plt.title('Scale factor')
+
+		ax = plt.subplot(gs[1, 1])
+		hcipy.imshow_field(self._amplitude_estimate, self.inst.pupilGrid)
+		plt.axis('off')
+		plt.title(r'$\Psi$ Amplitude')
+		
+		ax = plt.subplot(gs[1, 2])
+		hcipy.imshow_field(self._phase_estimate, self.inst.pupilGrid)
+		plt.axis('off')
+		plt.title(r'$\Psi$ Phase ')
+
+		ax = plt.subplot(gs[2, :])
 		if self.cfg.params.psi_correction_mode is not 'all':
 			mm=np.arange(self.cfg.params.psi_start_mode_idx,
 				self.cfg.params.psi_nb_modes + self.cfg.params.psi_start_mode_idx)
