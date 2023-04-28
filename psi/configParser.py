@@ -8,6 +8,10 @@ class ConfigurationError(Exception):
 
 class Parameters(object):
     """
+    TODO uniform inst_mode names
+    TODO complete the description of the config parameters
+    TODO check which sensor is used : kernel, psi. And check relevant parameters
+
     Args:
         filename (string): The name of the configuration file
 
@@ -97,8 +101,8 @@ class Parameters(object):
         #  otherwise print a 'warning'
         if self.params.inst_mode == 'CVC':
             # if self.params.band == 'L':
-            if os.path.basename(self.params.f_lyot_stop)[0:8] != 'ls_CVC_L':
-                self.logger.warn(('Lyot stop fname does not seem to match for {0}'
+            if os.path.basename(self.params.f_lyot_stop)[0:8] != 'ls_CVC':
+                self.logger.warn(('Lyot stop fname does not seem to match for {0} \t'
                              'Please check the filename').format(self.params.inst_mode))
             # if self.params.band == 'N':
             #     if os.path.basename(self.params.f_lyot_stop)[0:8] != 'ls_CVC_N':
@@ -108,7 +112,7 @@ class Parameters(object):
             # if self.params.band == 'L':
             if os.path.basename(self.params.f_lyot_stop)[0:9] != 'ls_RAVC_L':
                 self.logger.warn(('Lyot stop fname does not seem to match for {0}'
-                             ' Please check the filename').format(self.params.inst_mode))
+                             '  Please check the filename').format(self.params.inst_mode))
             # if self.params.band == 'N':
             #     if os.path.basename(self.params.f_lyot_stop)[0:8] != 'ls_RAVC_N':
             #         self.logger(('Lyot stop fname does not seem to match for {0}.'

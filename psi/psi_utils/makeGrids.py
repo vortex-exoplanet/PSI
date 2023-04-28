@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.signal import convolve2d
 from .psi_utils import gauss_2Dalt
-from hcipy.aperture import circular_aperture, make_obstructed_circular_aperture
+from hcipy.aperture import make_circular_aperture, make_obstructed_circular_aperture
 from hcipy.coronagraphy import VortexCoronagraph
 from hcipy import inverse_tikhonov
 from hcipy.mode_basis import ModeBasis, make_zernike_basis
@@ -29,7 +29,7 @@ def makeFilters(grid, type="back_prop", sigma=0.05, cent_obs=0.27, outer_vin=1.0
 
     """
     if type == "back_prop":
-        filter_ = circular_aperture(lD)(grid)  # 15 is an arbitrary number set by Emiel.
+        filter_ = make_circular_aperture(lD)(grid)  # 15 is an arbitrary number set by Emiel.
     elif type == "ncpa":
         filter_ = make_obstructed_circular_aperture(1*0.7, 1.8*cent_obs)(grid)
     elif type == "reset":
